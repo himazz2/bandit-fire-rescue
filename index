@@ -1,0 +1,3426 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>Top-Down Game - Bandit Coop Rescue & Burn Out System</title>
+  <style>
+    * { margin: 0; padding: 0; overflow: hidden; background: #030805; font-family: monospace; user-select: none; }
+    
+    #container {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    canvas#stage {
+      width: 100vw;
+      height: 100vh;
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+      cursor: crosshair;
+    }
+
+    /* UI Layer */
+    #ui-layer {
+      position: absolute;
+      top: 12px;
+      left: 12px;
+      color: #00ff66;
+      font-size: 12px;
+      pointer-events: none;
+      line-height: 1.6;
+      text-shadow: 0 0 4px #004411;
+    }
+    #ui-layer * { pointer-events: none; }
+    #ui-drag-handle {
+      display: inline-block;
+      cursor: move;
+      pointer-events: auto !important;
+      background: rgba(0, 60, 30, 0.7);
+      border: 1px solid #00ff66;
+      border-radius: 3px;
+      padding: 1px 5px;
+      margin-right: 6px;
+      font-size: 10px;
+    }
+    #ui-layer.edit-collapsed #fire-gauge-container,
+    #ui-layer.edit-collapsed #wind-indicator-container,
+    #ui-layer.edit-collapsed #controls-hint {
+      display: none;
+    }
+
+    .badge {
+      padding: 2px 6px;
+      font-weight: bold;
+      border-radius: 2px;
+    }
+    .play-badge { background: #00ff66; color: #000; }
+    .edit-badge { background: #ff3366; color: #fff; }
+
+    /* Map Editor Panel */
+    #editor-panel {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      width: 270px;
+      background: rgba(0, 20, 10, 0.92);
+      border: 1px solid #00ff66;
+      color: #00ff66;
+      padding: 12px;
+      font-size: 11px;
+      border-radius: 4px;
+      display: none;
+      box-shadow: 0 0 12px rgba(0,255,102,0.25);
+      max-height: 90vh;
+      overflow-y: auto;
+    }
+
+    #editor-panel h3 {
+      margin-bottom: 8px;
+      border-bottom: 1px solid #00ff66;
+      padding-bottom: 4px;
+      color: #ffffff;
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .tool-group-title {
+      font-weight: bold;
+      color: #88ffaa;
+      margin: 6px 0 3px 0;
+      border-bottom: 1px dashed #00aa44;
+      padding-bottom: 2px;
+    }
+
+    .tool-btn {
+      display: block;
+      width: 100%;
+      background: #002b11;
+      border: 1px solid #00aa44;
+      color: #00ff66;
+      padding: 4px 6px;
+      margin-bottom: 3px;
+      cursor: pointer;
+      text-align: left;
+      font-family: monospace;
+      font-size: 10.5px;
+      border-radius: 2px;
+    }
+
+    .tool-btn:hover { background: #005522; }
+    .tool-btn.active { background: #00ff66; color: #000; font-weight: bold; }
+
+    .danger-btn {
+      background: #330011;
+      border-color: #ff3366;
+      color: #ff3366;
+      margin-top: 6px;
+    }
+    .danger-btn:hover { background: #660022; color: #fff; }
+
+    .opt-row {
+      margin: 6px 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    select, input[type="text"], input[type="number"] {
+      background: #001a0a;
+      border: 1px solid #00ff66;
+      color: #00ff66;
+      font-family: monospace;
+      font-size: 11px;
+      padding: 2px 4px;
+      border-radius: 2px;
+    }
+
+    #editor-stats {
+      font-size: 9px;
+      color: #88ffaa;
+      margin-bottom: 6px;
+      padding: 4px;
+      background: rgba(0,0,0,0.4);
+      border-radius: 2px;
+      display: flex;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 2px 6px;
+    }
+
+    textarea#json-io {
+      width: 100%;
+      height: 45px;
+      background: #001105;
+      border: 1px solid #00AA44;
+      color: #00ff66;
+      font-size: 10px;
+      resize: none;
+      margin-top: 4px;
+      box-sizing: border-box;
+      padding: 4px;
+    }
+
+    .io-btn-group {
+      display: flex;
+      gap: 4px;
+      margin-top: 4px;
+    }
+
+    .io-btn-group button {
+      flex: 1;
+      background: #003318;
+      border: 1px solid #00ff66;
+      color: #00ff66;
+      padding: 4px;
+      cursor: pointer;
+      font-size: 10px;
+    }
+    .io-btn-group button:hover { background: #006633; }
+  </style>
+</head>
+<body>
+  <div id="container">
+    <canvas id="stage"></canvas>
+
+    <div id="ui-layer">
+      <div><span id="ui-drag-handle" title="ドラッグして移動">✥ 移動</span>MODE: <span id="mode-label" class="badge play-badge">PLAY MODE</span> <span style="color:#aaa;">( [Tab] 切替 / [H] ヘルプ・エディタ非表示 )</span></div>
+      
+      <!-- 火災状況ゲージ -->
+      <div id="fire-gauge-container" style="margin: 6px 0; background: rgba(0, 20, 10, 0.85); border: 1px solid #00ff66; padding: 4px 6px; border-radius: 4px; width: 210px;">
+        <div style="display:flex; justify-content:space-between; font-size:10px; font-weight:bold; margin-bottom:2px;">
+          <span>🔥 火災状況 (FIRE GAUGE)</span>
+          <span id="fire-gauge-text">0 / 12</span>
+        </div>
+        <div style="width: 100%; background: #112211; height: 10px; border-radius: 2px; border: 1px solid #004422; overflow: hidden; position: relative;">
+          <div id="fire-gauge-fill" style="width: 0%; height: 100%; background: linear-gradient(90deg, #ffbb00, #ff2200); transition: width 0.1s ease;"></div>
+        </div>
+      </div>
+
+      <!-- 風向きインジケーター -->
+      <div id="wind-indicator-container" style="margin: 6px 0; background: rgba(0, 20, 10, 0.85); border: 1px solid #00ff66; padding: 4px 6px; border-radius: 4px; width: 210px; display:flex; align-items:center; justify-content:space-between;">
+        <span style="font-size:10px; font-weight:bold;">💨 風向き (WIND)</span>
+        <div style="display:flex; align-items:center; gap:5px;">
+          <svg id="wind-arrow-svg" width="14" height="14" viewBox="0 0 24 24" style="transform: rotate(90deg); transition: transform 0.25s ease, opacity 0.25s ease;">
+            <path d="M12 3 L12 21 M12 3 L6 10 M12 3 L18 10" stroke="#00ff66" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <span id="wind-strength-label" style="font-size:9px; color:#88ffaa;">無風</span>
+        </div>
+      </div>
+
+      <div id="controls-hint">
+        [WASD]: 移動 | [Shift]: ダッシュ | <b style="color:#ffff00;">[F]: ライトON/OFF</b><br>
+        [E]: 持つ/置く/ドア | <b style="color:#fff;">[Space]: 消火噴射 / 縄拘束</b><br>
+        <b style="color:#00ff66;">[EDIT時 R]: 回転 | [PLAY時 終了時 R]: リトライ | [H]: ヘルプ/エディタ切替</b>
+      </div>
+    </div>
+
+    <!-- MAP EDITOR PANEL -->
+    <div id="editor-panel">
+      <h3>🏗️ MAP EDITOR</h3>
+
+      <div class="opt-row">
+        <label>🎮 ゲームモード:</label>
+        <select id="sel-game-mode" onchange="isClearMode = (this.value === 'clear')">
+          <option value="clear">クリア有り (Clear Mode)</option>
+          <option value="free">フリーモード (Free Mode)</option>
+        </select>
+      </div>
+
+      <div class="opt-row">
+        <label>📐 ステージサイズ:</label>
+        <select id="sel-stage-size" onchange="changeStageSize(this.value)">
+          <option value="240x180">標準 (240x180)</option>
+          <option value="360x270">拡大 (360x270)</option>
+          <option value="480x360">特大 (480x360)</option>
+          <option value="600x450">超特大 (600x450)</option>
+          <option value="720x540">最大 (720x540)</option>
+        </select>
+      </div>
+
+      <div class="opt-row">
+        <label>🧱 壁の種類:</label>
+        <select id="sel-wall-type">
+          <option value="concrete">コンクリート (Concrete)</option>
+          <option value="brick">レンガ (Brick)</option>
+          <option value="wood">木壁 [燃えて朽ちる] (Wood)</option>
+          <option value="glass">ガラス (Glass)</option>
+        </select>
+      </div>
+
+      <div class="opt-row">
+        <label>🚪 ドアの種類:</label>
+        <select id="sel-door-type">
+          <option value="wood">木製ドア (Wood)</option>
+          <option value="iron">鉄のドア (Iron)</option>
+        </select>
+      </div>
+
+      <div class="opt-row">
+        <label>🔥 限界火災数 (Burnout):</label>
+        <input type="number" id="num-fire-limit" value="12" min="1" max="100" style="width: 50px;" onchange="maxFireLimit = parseInt(this.value) || 12">
+      </div>
+
+      <div class="opt-row">
+        <label>🌳 環境 (Environment):</label>
+        <select id="sel-environment" onchange="mapEnvironment = this.value; updateWindIndicator();">
+          <option value="indoor">屋内 (Indoor)</option>
+          <option value="outdoor">屋外 (Outdoor)</option>
+        </select>
+      </div>
+
+      <div class="opt-row">
+        <label>💨 風向き/風力 (Wind):</label>
+        <input type="range" id="range-wind-angle" min="0" max="359" value="0" style="width: 60px;" oninput="windAngle = this.value * Math.PI / 180; updateWindDisplay();">
+        <span id="wind-angle-display" style="font-size:10px; color:#88ffaa; width:26px; display:inline-block; text-align:right;">0°</span>
+        <input type="number" id="num-wind-strength" value="0" min="0" max="10" style="width: 34px;" oninput="windStrength = parseFloat(this.value) || 0; updateWindDisplay();">
+      </div>
+
+      <div class="tool-group-title">🎥 カメラ (Editor View)</div>
+      <div class="opt-row">
+        <span style="font-size:11px; opacity:0.8;">矢印キー:移動　ホイール:ズーム</span>
+      </div>
+      <button class="tool-btn" onclick="resetEditorCamera()">📷 表示リセット (Reset View)</button>
+      <button class="tool-btn" onclick="doUndo()">↩️ 元に戻す (Undo) [Ctrl+Z]</button>
+      <button class="tool-btn" onclick="doRedo()">↪️ やり直し (Redo) [Ctrl+Y]</button>
+
+      <div class="tool-group-title">🖼️ 部屋テンプレート</div>
+      <button class="tool-btn" id="btn-tool-template-capture" onclick="setTool('template-capture')">📐 範囲を選んで登録</button>
+      <button class="tool-btn" id="btn-tool-template-stamp" onclick="setTool('template-stamp')" disabled>🖨️ スタンプ配置</button>
+      <div class="opt-row">
+        <select id="sel-templates" onchange="selectTemplate(this.value)" style="width:100%;">
+          <option value="">-- テンプレート一覧 --</option>
+        </select>
+      </div>
+      <button class="tool-btn" onclick="deleteSelectedTemplate()">🗑️ 選択中テンプレを削除</button>
+
+      <div class="tool-group-title">基本構造 & スポーン</div>
+      <button class="tool-btn" id="btn-tool-spawn" onclick="setTool('spawn')">[S] スポーン位置 (Spawn)</button>
+      <button class="tool-btn active" id="btn-tool-wall" onclick="setTool('wall')">[1] 壁作成 (Wall)</button>
+      <button class="tool-btn" id="btn-tool-door" onclick="setTool('door')">[2] ドア設置 [R回転]</button>
+
+      <div class="tool-group-title">家具アイテム [Rで回転]</div>
+      <button class="tool-btn" id="btn-tool-desk" onclick="setTool('desk')">[3] 机 (Desk)</button>
+      <button class="tool-btn" id="btn-tool-chair" onclick="setTool('chair')">[4] 椅子 (Chair)</button>
+      <button class="tool-btn" id="btn-tool-bed" onclick="setTool('bed')">[5] ベッド (Bed)</button>
+      <button class="tool-btn" id="btn-tool-shelf" onclick="setTool('shelf')">[6] 本棚/棚 (Shelf)</button>
+      <button class="tool-btn" id="btn-tool-tv" onclick="setTool('tv')">[7] テレビ (TV)</button>
+      <button class="tool-btn" id="btn-tool-phone" onclick="setTool('phone')">[8] 電話 (Phone)</button>
+      <button class="tool-btn" id="btn-tool-washer" onclick="setTool('washer')">[9] 洗濯機 (Washer)</button>
+      <button class="tool-btn" id="btn-tool-clock" onclick="setTool('clock')">[C] 時計 (Clock)</button>
+      <button class="tool-btn" id="btn-tool-fridge" onclick="setTool('fridge')">冷蔵庫 (Fridge)</button>
+      <button class="tool-btn" id="btn-tool-sofa" onclick="setTool('sofa')">ソファ (Sofa)</button>
+      <button class="tool-btn" id="btn-tool-sink" onclick="setTool('sink')">シンク (Sink)</button>
+      <button class="tool-btn" id="btn-tool-plant" onclick="setTool('plant')">観葉植物 (Plant)</button>
+
+      <div class="tool-group-title">🌳 屋外アイテム</div>
+      <button class="tool-btn" id="btn-tool-tree" onclick="setTool('tree')">木 (Tree)</button>
+      <button class="tool-btn" id="btn-tool-lamp" onclick="setTool('lamp')">外灯 (Streetlamp)</button>
+
+      <div class="tool-group-title">インタラクティブ / キャラクター</div>
+      <button class="tool-btn" id="btn-tool-box" onclick="setTool('box')">木箱 (Box)</button>
+      <button class="tool-btn" id="btn-tool-ext" onclick="setTool('extinguisher')">消火器 (Ext)</button>
+      <button class="tool-btn" id="btn-tool-fire" onclick="setTool('fire')">炎 (Fire)</button>
+      <button class="tool-btn" id="btn-tool-rope" onclick="setTool('rope')">縄 (Rope)</button>
+      <button class="tool-btn" id="btn-tool-bandit" onclick="setTool('bandit')">バンディット (Bandit)</button>
+      <button class="tool-btn" id="btn-tool-firefighter" onclick="setTool('firefighter')">消防士味方 (Firefighter)</button>
+      <button class="tool-btn" id="btn-tool-erase" onclick="setTool('erase')">[0] 削除 (Erase)</button>
+
+      <div class="opt-row">
+        <label><input type="checkbox" id="chk-snap" checked> 8px グリッドスナップ</label>
+      </div>
+
+      <div id="editor-stats">
+        <span>壁:<b id="stat-walls">0</b></span>
+        <span>ドア:<b id="stat-doors">0</b></span>
+        <span>家具:<b id="stat-furnitures">0</b></span>
+        <span>箱:<b id="stat-boxes">0</b></span>
+        <span>消火器:<b id="stat-exts">0</b></span>
+        <span>炎:<b id="stat-fires">0</b></span>
+        <span>縄:<b id="stat-ropes">0</b></span>
+        <span>敵:<b id="stat-bandits">0</b></span>
+        <span>味方:<b id="stat-firefighters">0</b></span>
+      </div>
+
+      <button class="tool-btn danger-btn" onclick="clearAllFires()" style="border-color: #ffaa00; color: #ffaa00; background: #221800;">🔥 火をすべて消す (Clear Fires)</button>
+      <button class="tool-btn danger-btn" onclick="clearAllObjects()">🗑️ マップ全削除 (Clear All)</button>
+
+      <hr style="border-color: #00aa44; margin: 6px 0;">
+
+      <div>💾 マップデータ (JSON)</div>
+      <textarea id="json-io" placeholder="JSONデータ..."></textarea>
+      <div class="io-btn-group">
+        <button onclick="exportMapData()">Export (出力)</button>
+        <button onclick="importMapData()">Import (読み込み)</button>
+      </div>
+
+      <hr style="border-color: #00aa44; margin: 6px 0;">
+
+      <div>🗂️ マップスロット保存 (ブラウザ内)</div>
+      <div class="opt-row">
+        <input type="text" id="input-slot-name" placeholder="スロット名..." style="flex:1;">
+        <button onclick="saveMapSlot()">保存</button>
+      </div>
+      <div class="opt-row">
+        <select id="sel-slots" style="width:100%;">
+          <option value="">-- 保存済みマップ --</option>
+        </select>
+      </div>
+      <div class="io-btn-group">
+        <button onclick="loadMapSlot()">読み込み</button>
+        <button onclick="deleteMapSlot()">削除</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+let WIDTH = 240;
+let HEIGHT = 180;
+
+// --- 環境・天候 ---
+let mapEnvironment = 'indoor'; // 'indoor' | 'outdoor'
+let windAngle = 0;    // ラジアン
+let windStrength = 0; // 0-10
+
+function updateWindDisplay() {
+  const deg = Math.round(windAngle * 180 / Math.PI);
+  const disp = document.getElementById('wind-angle-display');
+  if (disp) disp.textContent = deg + '°';
+  updateWindIndicator();
+}
+
+// 屋外の方が風の影響を強く受ける（屋内は建物に遮られるため弱める）
+function getEffectiveWindStrength() {
+  return windStrength * (mapEnvironment === 'outdoor' ? 1 : 0.25);
+}
+
+// UI上の風向き矢印・強さ表示を更新
+function updateWindIndicator() {
+  const arrow = document.getElementById('wind-arrow-svg');
+  const label = document.getElementById('wind-strength-label');
+  if (!arrow || !label) return;
+  const deg = windAngle * 180 / Math.PI;
+  arrow.style.transform = `rotate(${deg + 90}deg)`;
+  if (windStrength <= 0) {
+    label.textContent = '無風';
+    arrow.style.opacity = '0.25';
+  } else {
+    const isOutdoor = mapEnvironment === 'outdoor';
+    label.textContent = `${windStrength}${isOutdoor ? '' : ' (屋内で減衰)'}`;
+    arrow.style.opacity = String(0.35 + 0.65 * Math.min(1, getEffectiveWindStrength() / 10));
+  }
+}
+
+// --- エディタ用カメラ (パン & ズーム) ---
+const editorCamera = { x: 0, y: 0, zoom: 1 };
+const camKeys = { up: false, down: false, left: false, right: false };
+
+function applyEditorCameraTransform() {
+  if (!isEditMode) {
+    canvas.style.transform = '';
+    return;
+  }
+  const scaleX = window.innerWidth / WIDTH;
+  const scaleY = window.innerHeight / HEIGHT;
+  const tx = -editorCamera.x * scaleX;
+  const ty = -editorCamera.y * scaleY;
+  canvas.style.transformOrigin = '0 0';
+  canvas.style.transform = `scale(${editorCamera.zoom}) translate(${tx}px, ${ty}px)`;
+}
+
+function clampEditorCamera() {
+  const maxX = Math.max(0, WIDTH * (1 - 1 / editorCamera.zoom));
+  const maxY = Math.max(0, HEIGHT * (1 - 1 / editorCamera.zoom));
+  editorCamera.x = Math.max(0, Math.min(maxX, editorCamera.x));
+  editorCamera.y = Math.max(0, Math.min(maxY, editorCamera.y));
+}
+
+function resetEditorCamera() {
+  editorCamera.x = 0;
+  editorCamera.y = 0;
+  editorCamera.zoom = 1;
+  applyEditorCameraTransform();
+}
+
+function setUiLayerEditVisibility(editMode) {
+  const layer = document.getElementById('ui-layer');
+  if (!layer) return;
+  // 編集中は火災ゲージ・操作ヒントを畳んで、左上の視界を確保する
+  if (editMode) layer.classList.add('edit-collapsed');
+  else layer.classList.remove('edit-collapsed');
+}
+
+// --- 左上UIレイヤーのドラッグ移動 ---
+(function setupUiLayerDrag() {
+  const layer = document.getElementById('ui-layer');
+  const handle = document.getElementById('ui-drag-handle');
+  if (!layer || !handle) return;
+
+  let dragging = false;
+  let startMouseX = 0, startMouseY = 0, startLeft = 0, startTop = 0;
+
+  handle.addEventListener('mousedown', e => {
+    dragging = true;
+    const rect = layer.getBoundingClientRect();
+    startMouseX = e.clientX; startMouseY = e.clientY;
+    startLeft = rect.left; startTop = rect.top;
+    e.preventDefault();
+  });
+
+  window.addEventListener('mousemove', e => {
+    if (!dragging) return;
+    const nx = startLeft + (e.clientX - startMouseX);
+    const ny = startTop + (e.clientY - startMouseY);
+    layer.style.left = Math.max(0, nx) + 'px';
+    layer.style.top = Math.max(0, ny) + 'px';
+  });
+
+  window.addEventListener('mouseup', () => { dragging = false; });
+})();
+
+function updateEditorCameraPan() {
+  if (!isEditMode) return;
+  const panSpeed = 6 / editorCamera.zoom;
+  if (camKeys.left) editorCamera.x -= panSpeed;
+  if (camKeys.right) editorCamera.x += panSpeed;
+  if (camKeys.up) editorCamera.y -= panSpeed;
+  if (camKeys.down) editorCamera.y += panSpeed;
+  if (camKeys.left || camKeys.right || camKeys.up || camKeys.down) {
+    clampEditorCamera();
+    applyEditorCameraTransform();
+  }
+}
+
+// --- Undo / Redo ---
+let undoStack = [];
+let redoStack = [];
+const UNDO_LIMIT = 30;
+
+function snapshotEditState() {
+  return JSON.stringify({
+    walls, doors,
+    furnitures: furnitures.map(f => ({ type: f.type, x: f.x, y: f.y, angle: f.angle })),
+    boxes: boxes.map(b => ({ x: b.x, y: b.y })),
+    extinguishers: extinguishers.map(e => ({ x: e.x, y: e.y })),
+    fires: fires.map(f => ({ x: f.x, y: f.y, maxRadius: f.maxRadius })),
+    initialFires,
+    ropes: ropes.map(r => ({ x: r.x, y: r.y })),
+    bandits: bandits.map(b => ({ x: b.x, y: b.y })),
+    firefighters: firefighters.map(f => ({ x: f.x, y: f.y })),
+    spawnPoint
+  });
+}
+
+function restoreEditState(snapStr) {
+  const s = JSON.parse(snapStr);
+  walls = s.walls;
+  doors = s.doors.map(d => Object.assign(new Door(d.hx, d.hy, d.length, d.baseAngle, d.type), d));
+  furnitures = s.furnitures.map(f => new Furniture(f.type, f.x, f.y, f.angle));
+  boxes = s.boxes.map(b => new WoodBox(b.x, b.y));
+  extinguishers = s.extinguishers.map(e => new Extinguisher(e.x, e.y));
+  fires = s.fires.map(f => new Fire(f.x, f.y, f.maxRadius));
+  initialFires = s.initialFires;
+  ropes = s.ropes.map(r => new Rope(r.x, r.y));
+  bandits = s.bandits.map(b => new Bandit(b.x, b.y));
+  firefighters = s.firefighters.map(f => new Firefighter(f.x, f.y));
+  spawnPoint = s.spawnPoint;
+  updateStats();
+}
+
+function pushUndo() {
+  undoStack.push(snapshotEditState());
+  if (undoStack.length > UNDO_LIMIT) undoStack.shift();
+  redoStack = [];
+}
+
+function doUndo() {
+  if (!isEditMode || undoStack.length === 0) return;
+  redoStack.push(snapshotEditState());
+  const snap = undoStack.pop();
+  restoreEditState(snap);
+}
+
+function doRedo() {
+  if (!isEditMode || redoStack.length === 0) return;
+  undoStack.push(snapshotEditState());
+  const snap = redoStack.pop();
+  restoreEditState(snap);
+}
+
+// --- 部屋テンプレート (スタンプ) ---
+let templates = {}; // name -> { items: [...] } (相対座標)
+let templateCaptureStart = null;
+let activeTemplateName = '';
+
+function loadTemplatesFromStorage() {
+  try {
+    templates = JSON.parse(localStorage.getItem('fireGameTemplates') || '{}');
+  } catch (e) { templates = {}; }
+  refreshTemplateSelect();
+}
+
+function saveTemplatesToStorage() {
+  localStorage.setItem('fireGameTemplates', JSON.stringify(templates));
+}
+
+function refreshTemplateSelect() {
+  const sel = document.getElementById('sel-templates');
+  if (!sel) return;
+  const current = sel.value;
+  sel.innerHTML = '<option value="">-- テンプレート一覧 --</option>';
+  Object.keys(templates).forEach(name => {
+    const opt = document.createElement('option');
+    opt.value = name;
+    opt.innerText = name;
+    sel.appendChild(opt);
+  });
+  sel.value = current in templates ? current : '';
+}
+
+function selectTemplate(name) {
+  activeTemplateName = name;
+  const stampBtn = document.getElementById('btn-tool-template-stamp');
+  if (stampBtn) stampBtn.disabled = !name;
+}
+
+function deleteSelectedTemplate() {
+  if (!activeTemplateName || !templates[activeTemplateName]) return;
+  delete templates[activeTemplateName];
+  saveTemplatesToStorage();
+  activeTemplateName = '';
+  refreshTemplateSelect();
+  selectTemplate('');
+}
+
+function captureTemplateFromRect(x1, y1, x2, y2) {
+  const minX = Math.min(x1, x2), maxX = Math.max(x1, x2);
+  const minY = Math.min(y1, y2), maxY = Math.max(y1, y2);
+  const items = [];
+
+  const inRect = (px, py) => px >= minX && px <= maxX && py >= minY && py <= maxY;
+
+  walls.forEach(w => {
+    if (inRect((w.x1 + w.x2) / 2, (w.y1 + w.y2) / 2)) {
+      items.push({ kind: 'wall', x1: w.x1 - minX, y1: w.y1 - minY, x2: w.x2 - minX, y2: w.y2 - minY, type: w.type, hp: w.hp });
+    }
+  });
+  doors.forEach(d => {
+    if (inRect(d.hx, d.hy)) {
+      items.push({ kind: 'door', x: d.hx - minX, y: d.hy - minY, length: d.length, angle: d.baseAngle, type: d.type });
+    }
+  });
+  furnitures.forEach(f => {
+    if (inRect(f.x, f.y)) items.push({ kind: 'furniture', type: f.type, x: f.x - minX, y: f.y - minY, angle: f.angle });
+  });
+  boxes.forEach(b => {
+    if (inRect(b.x, b.y)) items.push({ kind: 'box', x: b.x - minX, y: b.y - minY });
+  });
+  extinguishers.forEach(ex => {
+    if (inRect(ex.x, ex.y)) items.push({ kind: 'extinguisher', x: ex.x - minX, y: ex.y - minY });
+  });
+
+  if (items.length === 0) {
+    alert('選択範囲内にオブジェクトがありません。');
+    return;
+  }
+  const name = prompt('テンプレート名を入力してください:', '部屋テンプレート' + (Object.keys(templates).length + 1));
+  if (!name) return;
+  templates[name] = { items };
+  saveTemplatesToStorage();
+  refreshTemplateSelect();
+  document.getElementById('sel-templates').value = name;
+  selectTemplate(name);
+}
+
+function stampTemplateAt(name, ox, oy) {
+  const tpl = templates[name];
+  if (!tpl) return;
+  pushUndo();
+  tpl.items.forEach(it => {
+    if (it.kind === 'wall') {
+      walls.push({ x1: it.x1 + ox, y1: it.y1 + oy, x2: it.x2 + ox, y2: it.y2 + oy, type: it.type, hp: it.type === 'wood' ? 100 : undefined });
+    } else if (it.kind === 'door') {
+      doors.push(new Door(it.x + ox, it.y + oy, it.length, it.angle, it.type));
+    } else if (it.kind === 'furniture') {
+      furnitures.push(new Furniture(it.type, it.x + ox, it.y + oy, it.angle));
+    } else if (it.kind === 'box') {
+      boxes.push(new WoodBox(it.x + ox, it.y + oy));
+    } else if (it.kind === 'extinguisher') {
+      extinguishers.push(new Extinguisher(it.x + ox, it.y + oy));
+    }
+  });
+  updateStats();
+}
+
+// --- マップスロット保存 (localStorage) ---
+function refreshSlotSelect() {
+  const sel = document.getElementById('sel-slots');
+  if (!sel) return;
+  let slots = {};
+  try { slots = JSON.parse(localStorage.getItem('fireGameMapSlots') || '{}'); } catch (e) { slots = {}; }
+  const current = sel.value;
+  sel.innerHTML = '<option value="">-- 保存済みマップ --</option>';
+  Object.keys(slots).forEach(name => {
+    const opt = document.createElement('option');
+    opt.value = name;
+    opt.innerText = name;
+    sel.appendChild(opt);
+  });
+  sel.value = current in slots ? current : '';
+}
+
+function saveMapSlot() {
+  const nameInput = document.getElementById('input-slot-name');
+  const name = (nameInput.value || '').trim();
+  if (!name) { alert('スロット名を入力してください。'); return; }
+  let slots = {};
+  try { slots = JSON.parse(localStorage.getItem('fireGameMapSlots') || '{}'); } catch (e) { slots = {}; }
+  slots[name] = buildMapDataObject();
+  localStorage.setItem('fireGameMapSlots', JSON.stringify(slots));
+  nameInput.value = '';
+  refreshSlotSelect();
+  document.getElementById('sel-slots').value = name;
+}
+
+function loadMapSlot() {
+  const sel = document.getElementById('sel-slots');
+  const name = sel.value;
+  if (!name) { alert('読み込むスロットを選択してください。'); return; }
+  let slots = {};
+  try { slots = JSON.parse(localStorage.getItem('fireGameMapSlots') || '{}'); } catch (e) { slots = {}; }
+  if (!slots[name]) return;
+  applyMapDataObject(slots[name]);
+}
+
+function deleteMapSlot() {
+  const sel = document.getElementById('sel-slots');
+  const name = sel.value;
+  if (!name) return;
+  let slots = {};
+  try { slots = JSON.parse(localStorage.getItem('fireGameMapSlots') || '{}'); } catch (e) { slots = {}; }
+  delete slots[name];
+  localStorage.setItem('fireGameMapSlots', JSON.stringify(slots));
+  refreshSlotSelect();
+}
+
+const canvas = document.getElementById('stage');
+const ctx = canvas.getContext('2d');
+
+let imgData, pixels, lightMap;
+
+function setStageDimensions(w, h) {
+  WIDTH = w;
+  HEIGHT = h;
+  canvas.width = WIDTH;
+  canvas.height = HEIGHT;
+  imgData = ctx.createImageData(WIDTH, HEIGHT);
+  pixels = imgData.data;
+  lightMap = new Float32Array(WIDTH * HEIGHT);
+}
+
+setStageDimensions(240, 180);
+
+function changeStageSize(val) {
+  const [w, h] = val.split('x').map(Number);
+  setStageDimensions(w, h);
+}
+
+// --- モード＆エディタ状態 ---
+let isEditMode = false;
+let isClearMode = true; // クリア判定有効モード
+let currentTool = 'wall';
+let itemRotateAngle = 0;
+let snapToGrid = true;
+let wallStartPoint = null;
+let currentMousePos = { x: 0, y: 0 };
+let isMouseInCanvas = false;
+let showHelp = true;
+
+// ゲームオーバー＆クリア状態
+let maxFireLimit = 12;
+let isGameOver = false;
+let isGameClear = false;
+let gameOverAlpha = 0;
+let gameClearAlpha = 0;
+
+// 初期スポーン地点
+let spawnPoint = { x: 40, y: 90 };
+
+const keys = { w: false, a: false, s: false, d: false, shift: false, e: false, space: false };
+let isLightOn = true;
+
+// 2線分の交差判定（壁越しの延焼防止用）
+function lineIntersectsSegment(x1, y1, x2, y2, x3, y3, x4, y4) {
+  const denom = (y4 - y3) * (x2 - x1) - (x4 - x3) * (y2 - y1);
+  if (denom === 0) return false;
+  const ua = ((x4 - x3) * (y1 - y3) - (y4 - y3) * (x1 - x3)) / denom;
+  const ub = ((x2 - x1) * (y1 - y3) - (y2 - y1) * (x1 - x3)) / denom;
+  return ua >= 0 && ua <= 1 && ub >= 0 && ub <= 1;
+}
+
+// 壁を越えた延焼を判定（木壁は遮断しない）
+function isPathBlockedByWall(x1, y1, x2, y2) {
+  for (let w of walls) {
+    if (w.type === 'wood') continue; // 木壁は遮断しない
+    if (lineIntersectsSegment(x1, y1, x2, y2, w.x1, w.y1, w.x2, w.y2)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// --- 衝突計算 ---
+function collideCircleSegment(px, py, radius, x1, y1, x2, y2) {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const lenSq = dx * dx + dy * dy;
+  let t = 0;
+  if (lenSq > 0) {
+    t = ((px - x1) * dx + (py - y1) * dy) / lenSq;
+    t = Math.max(0, Math.min(1, t));
+  }
+  const nx = x1 + t * dx;
+  const ny = y1 + t * dy;
+  
+  const diffX = px - nx;
+  const diffY = py - ny;
+  const distSq = diffX * diffX + diffY * diffY;
+
+  if (distSq < radius * radius) {
+    let dist = Math.sqrt(distSq);
+    let pushX, pushY;
+
+    if (dist < 0.0001) {
+      const lineLen = Math.sqrt(lenSq) || 1;
+      pushX = -dy / lineLen;
+      pushY = dx / lineLen;
+      dist = 0;
+    } else {
+      pushX = diffX / dist;
+      pushY = diffY / dist;
+    }
+
+    const overlap = radius - dist;
+    return { x: px + pushX * overlap, y: py + pushY * overlap, hit: true };
+  }
+  return { x: px, y: py, hit: false };
+}
+
+function collideCircleRect(px, py, radius, rx, ry, rw, rh) {
+  const closestX = Math.max(rx - rw / 2, Math.min(px, rx + rw / 2));
+  const closestY = Math.max(ry - rh / 2, Math.min(py, ry + rh / 2));
+  const dx = px - closestX;
+  const dy = py - closestY;
+  const distSq = dx * dx + dy * dy;
+
+  if (distSq < radius * radius) {
+    const dist = Math.sqrt(distSq);
+    if (dist < 0.0001) {
+      return { x: px, y: py - radius, hit: true };
+    }
+    const overlap = radius - dist;
+    return { x: px + (dx / dist) * overlap, y: py + (dy / dist) * overlap, hit: true };
+  }
+  return { x: px, y: py, hit: false };
+}
+
+function collideCircleRotatedRect(px, py, radius, rx, ry, rw, rh, angle) {
+  if (!angle) return collideCircleRect(px, py, radius, rx, ry, rw, rh);
+
+  const dx = px - rx;
+  const dy = py - ry;
+  const cos = Math.cos(-angle);
+  const sin = Math.sin(-angle);
+  const localX = dx * cos - dy * sin;
+  const localY = dx * sin + dy * cos;
+
+  const col = collideCircleRect(localX, localY, radius, 0, 0, rw, rh);
+  if (!col.hit) return { x: px, y: py, hit: false };
+
+  const unCos = Math.cos(angle);
+  const unSin = Math.sin(angle);
+  const worldX = rx + col.x * unCos - col.y * unSin;
+  const worldY = ry + col.x * unSin + col.y * unCos;
+
+  return { x: worldX, y: worldY, hit: true };
+}
+
+// --- 歩行アニメーションクラス ---
+class CharacterAnimation {
+  constructor() {
+    this.walkPhase = 0;
+    this.lFoot = { x: 0, y: 0 };
+    this.rFoot = { x: 0, y: 0 };
+  }
+
+  update(px, py, angle, speed, isDashing) {
+    const strideFreq = isDashing ? 0.35 : 0.22;
+    if (speed > 0.08) {
+      this.walkPhase += speed * strideFreq;
+    } else {
+      let diff = (Math.round(this.walkPhase / (Math.PI * 2)) * Math.PI * 2) - this.walkPhase;
+      this.walkPhase += diff * 0.18;
+    }
+
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    const sideCos = Math.cos(angle + Math.PI / 2);
+    const sideSin = Math.sin(angle + Math.PI / 2);
+
+    const footSpacing = 1.8;
+    const strideLength = isDashing ? 5.0 : 3.2;
+
+    const lOffset = Math.sin(this.walkPhase) * strideLength;
+    const rOffset = Math.sin(this.walkPhase + Math.PI) * strideLength;
+
+    this.lFoot = {
+      x: px - sideCos * footSpacing + cos * lOffset,
+      y: py - sideSin * footSpacing + sin * lOffset
+    };
+
+    this.rFoot = {
+      x: px + sideCos * footSpacing + cos * rOffset,
+      y: py + sideSin * footSpacing + sin * rOffset
+    };
+
+    const bodyBob = Math.abs(Math.sin(this.walkPhase * 2)) * (speed > 0.1 ? 0.4 : 0.0);
+    const bodySway = Math.sin(this.walkPhase) * (speed > 0.1 ? 0.2 : 0.0);
+
+    return {
+      lFoot: this.lFoot,
+      rFoot: this.rFoot,
+      bodyBob,
+      bodySway,
+      armSwing: Math.sin(this.walkPhase) * (isDashing ? 2.5 : 1.4)
+    };
+  }
+}
+
+// --- 構成粒子クラス ---
+class CoreParticle {
+  constructor(nodeName) {
+    this.nodeName = nodeName;
+    this.x = WIDTH / 2;
+    this.y = HEIGHT / 2;
+    this.vx = 0;
+    this.vy = 0;
+
+    if (nodeName === 'head') {
+      this.radius = 1.4 + Math.random() * 0.6;
+      this.offset = { x: (Math.random() - 0.5) * 1.8, y: (Math.random() - 0.5) * 1.8 };
+    } else if (nodeName === 'chest') {
+      this.radius = 1.3 + Math.random() * 0.6;
+      this.offset = { x: (Math.random() - 0.5) * 1.0, y: (Math.random() - 0.5) * 2.6 };
+    } else if (nodeName === 'pelvis') {
+      this.radius = 1.1 + Math.random() * 0.5;
+      this.offset = { x: (Math.random() - 0.5) * 1.0, y: (Math.random() - 0.5) * 1.8 };
+    } else {
+      this.radius = 1.0 + Math.random() * 0.4;
+      this.offset = { x: (Math.random() - 0.5) * 0.8, y: (Math.random() - 0.5) * 0.8 };
+    }
+  }
+
+  update(targetPos, bodyAngle, speed, isDashing) {
+    const spread = isDashing ? 1.08 + speed * 0.05 : 1.0;
+    const cos = Math.cos(bodyAngle);
+    const sin = Math.sin(bodyAngle);
+
+    const rx = (this.offset.x * cos - this.offset.y * sin) * spread;
+    const ry = (this.offset.x * sin + this.offset.y * cos) * spread;
+
+    const tx = targetPos.x + rx;
+    const ty = targetPos.y + ry;
+
+    const pull = 0.30;
+    this.vx = (this.vx + (tx - this.x) * pull) * 0.55;
+    this.vy = (this.vy + (ty - this.y) * pull) * 0.55;
+
+    this.x += this.vx;
+    this.y += this.vy;
+  }
+}
+
+const nodeDistribution = [
+  { name: 'head', count: 16 }, { name: 'chest', count: 20 }, { name: 'pelvis', count: 12 },
+  { name: 'lHand', count: 8 }, { name: 'rHand', count: 8 }, { name: 'lFoot', count: 7 }, { name: 'rFoot', count: 7 }
+];
+
+// --- 家具クラス ---
+class Furniture {
+  constructor(type, x, y, angle = 0) {
+    this.type = type;
+    this.x = x;
+    this.y = y;
+    this.angle = angle;
+    
+    const specs = {
+      desk:   { w: 16, h: 10 },
+      chair:  { w: 6,  h: 6 },
+      bed:    { w: 14, h: 22 },
+      shelf:  { w: 16, h: 8 },
+      tv:     { w: 14, h: 8 },
+      phone:  { w: 8,  h: 8 },
+      washer: { w: 10, h: 10 },
+      clock:  { w: 6,  h: 6 },
+      fridge: { w: 10, h: 10 },
+      sofa:   { w: 20, h: 9 },
+      sink:   { w: 12, h: 8 },
+      plant:  { w: 7,  h: 7 },
+      tree:   { w: 16, h: 16 },
+      lamp:   { w: 6,  h: 14 }
+    };
+    const s = specs[type] || { w: 10, h: 10 };
+    this.w = s.w;
+    this.h = s.h;
+  }
+}
+
+class WoodBox {
+  constructor(x, y) {
+    this.x = x; this.y = y; this.size = 10; this.isCarried = false;
+  }
+}
+
+class Extinguisher {
+  constructor(x, y) {
+    this.x = x; this.y = y; this.w = 4; this.h = 9; this.isCarried = false;
+  }
+}
+
+class Rope {
+  constructor(x, y) {
+    this.x = x; this.y = y; this.isCarried = false;
+  }
+}
+
+class Fire {
+  constructor(x, y, maxRadius = 13.0) {
+    this.x = x; this.y = y;
+    this.maxHp = 100;
+    this.hp = 25;
+    this.radius = 3.0;
+    this.maxRadius = maxRadius;
+    this.spreadTimer = Math.random() * 200;
+  }
+
+  update() {
+    // エディット中やゲーム終了時は火の活動を停止
+    if (isEditMode || isGameOver || isGameClear) return;
+
+    if (this.hp < this.maxHp) this.hp += 0.08;
+    if (this.radius < this.maxRadius) this.radius += 0.006;
+
+    // 木壁を燃やす処理
+    walls.forEach(w => {
+      if (w.type === 'wood') {
+        const col = collideCircleSegment(this.x, this.y, 12, w.x1, w.y1, w.x2, w.y2);
+        if (col.hit) {
+          if (w.hp === undefined) w.hp = 100;
+          w.hp -= 0.12;
+        }
+      }
+    });
+
+    // 風が強いほど延焼判定の間隔を早める（風下方向に燃え広がりやすくなる）
+    // ※屋外の方が風の影響を強く受け、屋内は建物に遮られ弱まる
+    const effWind = getEffectiveWindStrength();
+    const windSpeedupFactor = 1 - Math.min(0.4, effWind * 0.03);
+
+    if (this.hp > 75 && fires.length < 35) {
+      this.spreadTimer++;
+      if (this.spreadTimer > (450 + Math.random() * 300) * windSpeedupFactor) {
+        this.spreadTimer = 0;
+        let angle = Math.random() * Math.PI * 2;
+        let dist = 9 + Math.random() * 12;
+
+        if (effWind > 0) {
+          // ランダム方向に風ベクトルを足し込んで、風下方向へ寄せる
+          const windX = Math.cos(windAngle) * effWind * 0.12;
+          const windY = Math.sin(windAngle) * effWind * 0.12;
+          const rx = Math.cos(angle) + windX;
+          const ry = Math.sin(angle) + windY;
+          angle = Math.atan2(ry, rx);
+          dist *= 1 + effWind * 0.05 * Math.max(0, Math.cos(angle - windAngle));
+        }
+
+        const nx = Math.max(10, Math.min(WIDTH - 10, this.x + Math.cos(angle) * dist));
+        const ny = Math.max(10, Math.min(HEIGHT - 10, this.y + Math.sin(angle) * dist));
+
+        // 壁を越えた延焼チェック（木壁以外は遮蔽される）
+        if (!isPathBlockedByWall(this.x, this.y, nx, ny)) {
+          fires.push(new Fire(nx, ny, Math.min(18, this.maxRadius + 1.5)));
+          if (isEditMode) updateStats();
+        }
+      }
+    }
+
+    // 煙を発生させる（勢いのある炎ほど出やすい。風に流されて漂う）
+    if (this.hp > 30 && smokeParticles.length < 260 && Math.random() < 0.05) {
+      smokeParticles.push(new SmokeParticle(
+        this.x + (Math.random() - 0.5) * this.radius,
+        this.y + (Math.random() - 0.5) * this.radius
+      ));
+    }
+  }
+}
+
+class Door {
+  constructor(hx, hy, length = 22, baseAngle = Math.PI / 2, type = 'wood') {
+    this.hx = hx; this.hy = hy;
+    this.length = length;
+    this.baseAngle = baseAngle;
+    this.angle = baseAngle;
+    this.isHeld = false;
+    this.grabAngleOffset = 0;
+    this.type = type || 'wood';
+  }
+
+  getKnobPos() {
+    const kDist = this.length - 4;
+    return { x: this.hx + Math.cos(this.angle) * kDist, y: this.hy + Math.sin(this.angle) * kDist };
+  }
+
+  getEndPos() {
+    return { x: this.hx + Math.cos(this.angle) * this.length, y: this.hy + Math.sin(this.angle) * this.length };
+  }
+
+  startHold(playerX, playerY) {
+    this.isHeld = true;
+    const currentPlayerAngle = Math.atan2(playerY - this.hy, playerX - this.hx);
+    this.grabAngleOffset = this.angle - currentPlayerAngle;
+  }
+
+  update(playerX, playerY) {
+    if (this.isHeld) {
+      const knob = this.getKnobPos();
+      if (Math.hypot(playerX - knob.x, playerY - knob.y) > 25) {
+        this.isHeld = false;
+        return;
+      }
+      const currentPlayerAngle = Math.atan2(playerY - this.hy, playerX - this.hx);
+      let targetA = currentPlayerAngle + this.grabAngleOffset;
+
+      let diffFromBase = targetA - this.baseAngle;
+      while (diffFromBase < -Math.PI) diffFromBase += Math.PI * 2;
+      while (diffFromBase > Math.PI) diffFromBase -= Math.PI * 2;
+
+      const maxLimit = Math.PI * 0.45;
+      diffFromBase = Math.max(-maxLimit, Math.min(maxLimit, diffFromBase));
+      targetA = this.baseAngle + diffFromBase;
+
+      let diff = targetA - this.angle;
+      while (diff < -Math.PI) diff += Math.PI * 2;
+      while (diff > Math.PI) diff -= Math.PI * 2;
+
+      diff = Math.max(-0.1, Math.min(0.1, diff * 0.3));
+      this.angle += diff;
+    }
+  }
+}
+
+// 煙（炎から立ち上り、風向きに流されて漂う）
+class SmokeParticle {
+  constructor(x, y) {
+    this.x = x; this.y = y;
+    const ang = Math.random() * Math.PI * 2;
+    const spd = 0.08 + Math.random() * 0.12;
+    this.vx = Math.cos(ang) * spd;
+    this.vy = Math.sin(ang) * spd;
+    this.life = 1.0;
+    this.decay = 0.0025 + Math.random() * 0.0018;
+    this.radius = 2.5 + Math.random() * 3.5;
+    this.growth = 0.008 + Math.random() * 0.01;
+  }
+  update() {
+    const eff = getEffectiveWindStrength();
+    if (eff > 0) {
+      this.vx += Math.cos(windAngle) * eff * 0.006;
+      this.vy += Math.sin(windAngle) * eff * 0.006;
+    }
+    this.vx *= 0.985;
+    this.vy *= 0.985;
+    this.x += this.vx;
+    this.y += this.vy;
+    this.radius += this.growth;
+    this.life -= this.decay;
+  }
+}
+
+class FoamParticle {
+  constructor(x, y, angle, isFirefighter = false) {
+    this.x = x; this.y = y;
+    const speed = 2.2 + Math.random() * 1.8;
+    const spread = (Math.random() - 0.5) * 0.45;
+    this.vx = Math.cos(angle + spread) * speed;
+    this.vy = Math.sin(angle + spread) * speed;
+    this.life = 1.0;
+    this.decay = 0.03 + Math.random() * 0.03;
+    this.radius = 1.2 + Math.random() * 1.5;
+    this.isFirefighter = isFirefighter; // 消防士NPCが発射した泡か（消火速度を遅くするため）
+  }
+  update() {
+    this.x += this.vx; this.y += this.vy;
+    this.vx *= 0.90; this.vy *= 0.90;
+    this.life -= this.decay;
+  }
+}
+
+class RopeCutParticle {
+  constructor(x, y) {
+    this.x = x; this.y = y;
+    const a = Math.random() * Math.PI * 2;
+    const spd = 0.8 + Math.random() * 1.5;
+    this.vx = Math.cos(a) * spd;
+    this.vy = Math.sin(a) * spd;
+    this.life = 1.0;
+  }
+  update() {
+    this.x += this.vx; this.y += this.vy;
+    this.life -= 0.05;
+  }
+}
+
+// 消防士 (味方NPC)
+class Firefighter {
+  constructor(x, y) {
+    this.startX = x;
+    this.startY = y;
+    this.x = x;
+    this.y = y;
+    this.vx = 0;
+    this.vy = 0;
+    this.angle = Math.random() * Math.PI * 2;
+    this.anim = new CharacterAnimation();
+    this.particles = [];
+
+    // 壁にハマった時の回避行動用
+    this.stuckFrames = 0;
+    this.avoidTimer = 0;
+    this.avoidDir = 1;
+    this.prevX = x;
+    this.prevY = y;
+
+    nodeDistribution.forEach(d => {
+      for (let i = 0; i < d.count; i++) this.particles.push(new CoreParticle(d.name));
+    });
+  }
+
+  reset() {
+    this.x = this.startX;
+    this.y = this.startY;
+    this.vx = 0;
+    this.vy = 0;
+    this.angle = Math.random() * Math.PI * 2;
+    this.stuckFrames = 0;
+    this.avoidTimer = 0;
+    this.prevX = this.startX;
+    this.prevY = this.startY;
+  }
+
+  update() {
+    if (isEditMode || isGameOver || isGameClear) return;
+
+    // 仲間を助けようとしているバンディットがいれば最優先ターゲットにする
+    let nearestBandit = null;
+    let banditDist = 9999;
+    bandits.forEach(b => {
+      if (!b.isNeutralized && !b.isTied && b.rescuingTarget) {
+        const d = Math.hypot(b.x - this.x, b.y - this.y);
+        if (d < banditDist) {
+          banditDist = d;
+          nearestBandit = b;
+        }
+      }
+    });
+
+    // バンディットがいなければ一番近い火をターゲットにする
+    let nearestFire = null;
+    let minDist = 9999;
+    fires.forEach(f => {
+      const d = Math.hypot(f.x - this.x, f.y - this.y);
+      if (d < minDist) {
+        minDist = d;
+        nearestFire = f;
+      }
+    });
+
+    const target = nearestBandit ? nearestBandit : nearestFire;
+    const targetDist = nearestBandit ? banditDist : minDist;
+
+    // 前フレームの実移動量から「壁に引っかかっている」状態を検出する
+    const actualMoved = Math.hypot(this.x - this.prevX, this.y - this.prevY);
+    const triedToMove = Math.hypot(this.vx, this.vy);
+    if (triedToMove > 0.12 && actualMoved < triedToMove * 0.25) {
+      this.stuckFrames++;
+    } else {
+      this.stuckFrames = Math.max(0, this.stuckFrames - 2);
+    }
+    if (this.stuckFrames > 14 && this.avoidTimer <= 0) {
+      // 壁沿いに迂回するため左右どちらかへ一定時間迂回する
+      this.avoidTimer = 50 + Math.random() * 40;
+      this.avoidDir = Math.random() < 0.5 ? 1 : -1;
+      this.stuckFrames = 0;
+    }
+    if (this.avoidTimer > 0) this.avoidTimer--;
+
+    if (target) {
+      let targetAngle = Math.atan2(target.y - this.y, target.x - this.x);
+
+      // 迂回中は目標角度を横方向にずらして壁沿いを回り込む
+      if (this.avoidTimer > 0 && targetDist > 28) {
+        targetAngle += this.avoidDir * (Math.PI * 0.55);
+      }
+
+      let diff = targetAngle - this.angle;
+      while (diff < -Math.PI) diff += Math.PI * 2;
+      while (diff > Math.PI) diff -= Math.PI * 2;
+      this.angle += diff * 0.2;
+
+      if (targetDist > 28) {
+        // バンディットを追う時は少し素早く駆け寄る
+        const chaseAccel = nearestBandit ? 0.28 : 0.2;
+        this.vx = (this.vx + Math.cos(this.angle) * chaseAccel) * 0.78;
+        this.vy = (this.vy + Math.sin(this.angle) * chaseAccel) * 0.78;
+      } else {
+        this.vx *= 0.5;
+        this.vy *= 0.5;
+
+        // 消火泡噴射（バンディットを狙っている時はそちらへ向けて噴射する）
+        const muzzleX = this.x + Math.cos(this.angle) * 8;
+        const muzzleY = this.y + Math.sin(this.angle) * 8;
+        for (let i = 0; i < 2; i++) {
+          foamParticles.push(new FoamParticle(muzzleX, muzzleY, this.angle, true));
+        }
+      }
+    } else {
+      this.vx *= 0.7;
+      this.vy *= 0.7;
+    }
+
+    // 至近距離にいる場合は泡が届く前に即座に妨害する（保険としての近接判定）
+    bandits.forEach(b => {
+      if (!b.isNeutralized && !b.isTied && b.rescuingTarget) {
+        if (Math.hypot(this.x - b.x, this.y - b.y) < 16) {
+          b.hitByExtinguisher(this.x, this.y);
+        }
+      }
+    });
+
+    this.prevX = this.x;
+    this.prevY = this.y;
+
+    // 消防士もドアを自動で開けられるようにする（近づいたドアを押し開ける）
+    doors.forEach(d => {
+      if (d.isHeld) return;
+      const dEnd = d.getEndPos();
+      const midX = (d.hx + dEnd.x) / 2;
+      const midY = (d.hy + dEnd.y) / 2;
+
+      if (Math.hypot(this.x - midX, this.y - midY) < 22) {
+        let pushDir = (Math.sin(this.angle - d.baseAngle) >= 0) ? 1 : -1;
+        let targetAngle = d.baseAngle + pushDir * (Math.PI * 0.42);
+
+        let diff = targetAngle - d.angle;
+        while (diff < -Math.PI) diff += Math.PI * 2;
+        while (diff > Math.PI) diff -= Math.PI * 2;
+
+        d.angle += Math.max(-0.12, Math.min(0.12, diff * 0.25));
+      }
+    });
+
+    let nextX = this.x + this.vx;
+    let nextY = this.y + this.vy;
+    const charR = 4.2;
+
+    let pushSumX = 0, pushSumY = 0, pushCount = 0;
+    walls.forEach(w => {
+      const before = { x: nextX, y: nextY };
+      const col = collideCircleSegment(nextX, nextY, charR, w.x1, w.y1, w.x2, w.y2);
+      nextX = col.x; nextY = col.y;
+      if (nextX !== before.x || nextY !== before.y) {
+        pushSumX += nextX - before.x; pushSumY += nextY - before.y; pushCount++;
+      }
+    });
+    doors.forEach(d => {
+      const dEnd = d.getEndPos();
+      const col = collideCircleSegment(nextX, nextY, charR, d.hx, d.hy, dEnd.x, dEnd.y);
+      nextX = col.x; nextY = col.y;
+    });
+    furnitures.forEach(f => {
+      const col = collideCircleRotatedRect(nextX, nextY, charR, f.x, f.y, f.w, f.h, f.angle);
+      nextX = col.x; nextY = col.y;
+    });
+
+    this.x = Math.max(10, Math.min(WIDTH - 10, nextX));
+    this.y = Math.max(10, Math.min(HEIGHT - 10, nextY));
+
+    // 長時間スタックが解消しない場合の強制脱出（壁の角にハマって延々復帰しないのを防ぐ）
+    if (this.stuckFrames > 90) {
+      if (pushCount > 0) {
+        this.x += (pushSumX / pushCount) * 3;
+        this.y += (pushSumY / pushCount) * 3;
+      }
+      this.angle = Math.random() * Math.PI * 2;
+      this.vx = 0; this.vy = 0;
+      this.stuckFrames = 0;
+      this.avoidTimer = 30 + Math.random() * 30;
+      this.avoidDir = Math.random() < 0.5 ? 1 : -1;
+    }
+  }
+
+  getNodes() {
+    const spd = isEditMode || isGameOver || isGameClear ? 0 : Math.hypot(this.vx, this.vy);
+    const animState = this.anim.update(this.x, this.y, this.angle, spd, false);
+
+    const cos = Math.cos(this.angle);
+    const sin = Math.sin(this.angle);
+    const sideCos = Math.cos(this.angle + Math.PI / 2);
+    const sideSin = Math.sin(this.angle + Math.PI / 2);
+
+    const headPos = { x: this.x + cos * 0.5, y: this.y + sin * 0.5 };
+    const chestPos = { x: this.x + sideCos * animState.bodySway, y: this.y + sideSin * animState.bodySway };
+    const pelvisPos = { x: this.x - cos * 2.0, y: this.y - sin * 2.0 };
+
+    const lHand = {
+      x: chestPos.x - sideCos * 2.0 + cos * 5.0,
+      y: chestPos.y - sideSin * 2.0 + sin * 5.0
+    };
+    const rHand = {
+      x: chestPos.x + sideCos * 2.0 + cos * 6.0,
+      y: chestPos.y + sideSin * 2.0 + sin * 6.0
+    };
+
+    return { head: headPos, chest: chestPos, pelvis: pelvisPos, lHand, rHand, lFoot: animState.lFoot, rFoot: animState.rFoot, spd };
+  }
+}
+
+// 放火犯バンディット (NPC)
+class Bandit {
+  constructor(x, y) {
+    this.startX = x;
+    this.startY = y;
+    this.x = x; this.y = y;
+    this.vx = 0; this.vy = 0;
+    this.angle = Math.random() * Math.PI * 2;
+    this.anim = new CharacterAnimation();
+    this.particles = [];
+
+    nodeDistribution.forEach(d => {
+      for (let i = 0; i < d.count; i++) this.particles.push(new CoreParticle(d.name));
+    });
+
+    this.isTied = false;
+    this.isNeutralized = false;
+    this.tiedTimer = 0;
+    this.fireTimer = 180 + Math.random() * 180;
+    this.targetX = x;
+    this.targetY = y;
+
+    // 連携・救出AI用変数
+    this.rescuingTarget = null;
+    this.rescueTimer = 0;
+
+    // 消火器を吹きかけられた時の逃走＆救出抑制タイマー
+    this.rescueCooldownTimer = 0; // 20秒(1200フレーム)
+    this.fleeTimer = 0; // 走って逃げるタイマー
+  }
+
+  // 初期状態リセット
+  reset() {
+    this.x = this.startX;
+    this.y = this.startY;
+    this.vx = 0; this.vy = 0;
+    this.angle = Math.random() * Math.PI * 2;
+    this.isTied = false;
+    this.isNeutralized = false;
+    this.tiedTimer = 0;
+    this.fireTimer = 180 + Math.random() * 180;
+    this.targetX = this.startX;
+    this.targetY = this.startY;
+    this.rescuingTarget = null;
+    this.rescueTimer = 0;
+    this.rescueCooldownTimer = 0;
+    this.fleeTimer = 0;
+  }
+
+  // 消火器噴射を受けた処理
+  hitByExtinguisher(sourceX, sourceY) {
+    if (this.isNeutralized || this.isTied) return;
+
+    // 救出作業中断
+    this.rescuingTarget = null;
+    this.rescueTimer = 0;
+
+    // 20秒間 (1200フレーム) 助けなくなる
+    this.rescueCooldownTimer = 1200;
+
+    // 走って逃げる方向を設定 (約3.5秒間逃走)
+    this.fleeTimer = 210;
+    const escapeAngle = Math.atan2(this.y - sourceY, this.x - sourceX) + (Math.random() - 0.5) * 0.8;
+    this.targetX = Math.max(15, Math.min(WIDTH - 15, this.x + Math.cos(escapeAngle) * 90));
+    this.targetY = Math.max(15, Math.min(HEIGHT - 15, this.y + Math.sin(escapeAngle) * 90));
+  }
+
+  update() {
+    if (isEditMode || isGameOver || isGameClear) return;
+
+    // タイマーデクリメント
+    if (this.rescueCooldownTimer > 0) this.rescueCooldownTimer--;
+    if (this.fleeTimer > 0) this.fleeTimer--;
+
+    if (this.isNeutralized) {
+      this.vx = 0; this.vy = 0;
+      this.rescueTimer = 0;
+      return;
+    }
+
+    if (this.isTied) {
+      this.tiedTimer--;
+      this.vx = 0; this.vy = 0;
+      this.rescueTimer = 0;
+      if (this.tiedTimer <= 0) {
+        this.isTied = false;
+        ropes.push(new Rope(this.x, this.y));
+        if (isEditMode) updateStats();
+
+        for (let i = 0; i < 12; i++) {
+          ropeCutParticles.push(new RopeCutParticle(this.x, this.y));
+        }
+      }
+      return;
+    }
+
+    // --- 仲間との連携救出AI ---
+    // rescueCooldownTimerが0の時のみ仲間を助けるルーチンが機能する
+    let trappedFriends = bandits.filter(b => b !== this && (b.isTied || b.isNeutralized));
+    if (this.rescueCooldownTimer <= 0 && trappedFriends.length > 0) {
+      // 一番近い捕まっている仲間を検索
+      trappedFriends.sort((a, b) => Math.hypot(this.x - a.x, this.y - a.y) - Math.hypot(this.x - b.x, this.y - b.y));
+      let targetFriend = trappedFriends[0];
+      this.rescuingTarget = targetFriend;
+      this.targetX = targetFriend.x;
+      this.targetY = targetFriend.y;
+
+      const distToFriend = Math.hypot(targetFriend.x - this.x, targetFriend.y - this.y);
+      if (distToFriend < 14) {
+        // 救出作業中 (5秒 = 300フレーム)
+        this.rescueTimer++;
+        this.vx *= 0.3;
+        this.vy *= 0.3;
+        this.angle = Math.atan2(targetFriend.y - this.y, targetFriend.x - this.x);
+
+        if (this.rescueTimer >= 300) {
+          // 開放（救出）成功！
+          if (targetFriend.isNeutralized) {
+            targetFriend.isNeutralized = false;
+            boxes.push(new WoodBox(targetFriend.x, targetFriend.y)); // 箱をドロップ
+          }
+          if (targetFriend.isTied) {
+            targetFriend.isTied = false;
+            // 拘束解除時にも縄をドロップする
+            ropes.push(new Rope(targetFriend.x, targetFriend.y));
+            for (let i = 0; i < 12; i++) {
+              ropeCutParticles.push(new RopeCutParticle(targetFriend.x, targetFriend.y));
+            }
+          }
+          this.rescueTimer = 0;
+          this.rescuingTarget = null;
+          if (isEditMode) updateStats();
+        }
+      } else {
+        this.rescueTimer = 0;
+      }
+    } else {
+      this.rescuingTarget = null;
+      this.rescueTimer = 0;
+
+      const dist = Math.hypot(this.targetX - this.x, this.targetY - this.y);
+      if (dist < 8 || Math.random() < (this.fleeTimer > 0 ? 0.08 : 0.015)) {
+        this.targetX = Math.max(20, Math.min(WIDTH - 20, this.x + (Math.random() - 0.5) * (this.fleeTimer > 0 ? 120 : 90)));
+        this.targetY = Math.max(20, Math.min(HEIGHT - 20, this.y + (Math.random() - 0.5) * (this.fleeTimer > 0 ? 120 : 90)));
+      }
+    }
+
+    // 移動制御（逃走中は素早く移動）
+    if (this.rescueTimer < 1) {
+      const moveA = Math.atan2(this.targetY - this.y, this.targetX - this.x);
+      const accel = this.fleeTimer > 0 ? 0.28 : 0.12;
+      this.vx = (this.vx + Math.cos(moveA) * accel) * 0.78;
+      this.vy = (this.vy + Math.sin(moveA) * accel) * 0.78;
+    }
+
+    let nextX = this.x + this.vx;
+    let nextY = this.y + this.vy;
+
+    if (Math.hypot(this.vx, this.vy) > 0.05) {
+      this.angle = Math.atan2(this.vy, this.vx);
+    }
+
+    doors.forEach(d => {
+      if (d.isHeld) return;
+      const dEnd = d.getEndPos();
+      const midX = (d.hx + dEnd.x) / 2;
+      const midY = (d.hy + dEnd.y) / 2;
+      
+      if (Math.hypot(this.x - midX, this.y - midY) < 22) {
+        let pushDir = (Math.sin(this.angle - d.baseAngle) >= 0) ? 1 : -1;
+        let targetAngle = d.baseAngle + pushDir * (Math.PI * 0.42);
+
+        let diff = targetAngle - d.angle;
+        while (diff < -Math.PI) diff += Math.PI * 2;
+        while (diff > Math.PI) diff -= Math.PI * 2;
+
+        d.angle += Math.max(-0.12, Math.min(0.12, diff * 0.25));
+      }
+    });
+
+    const charR = 4.2;
+    walls.forEach(w => {
+      const col = collideCircleSegment(nextX, nextY, charR, w.x1, w.y1, w.x2, w.y2);
+      nextX = col.x; nextY = col.y;
+    });
+    doors.forEach(d => {
+      const dEnd = d.getEndPos();
+      const col = collideCircleSegment(nextX, nextY, charR, d.hx, d.hy, dEnd.x, dEnd.y);
+      nextX = col.x; nextY = col.y;
+    });
+    furnitures.forEach(f => {
+      const col = collideCircleRotatedRect(nextX, nextY, charR, f.x, f.y, f.w, f.h, f.angle);
+      nextX = col.x; nextY = col.y;
+    });
+
+    this.x = Math.max(10, Math.min(WIDTH - 10, nextX));
+    this.y = Math.max(10, Math.min(HEIGHT - 10, nextY));
+
+    // 救出作業中でなければ放火（助けない20秒の最中も放火活動は継続する）
+    if (!this.rescuingTarget) {
+      this.fireTimer--;
+      if (this.fireTimer <= 0) {
+        this.fireTimer = 220 + Math.random() * 260;
+        if (fires.length < 35) {
+          fires.push(new Fire(this.x, this.y));
+          if (isEditMode) updateStats();
+        }
+      }
+    }
+  }
+
+  getNodes() {
+    const spd = isEditMode || isGameOver || isGameClear ? 0 : Math.hypot(this.vx, this.vy);
+    const animState = this.anim.update(this.x, this.y, this.angle, spd, this.fleeTimer > 0);
+
+    const cos = Math.cos(this.angle);
+    const sin = Math.sin(this.angle);
+    const sideCos = Math.cos(this.angle + Math.PI / 2);
+    const sideSin = Math.sin(this.angle + Math.PI / 2);
+
+    const headPos = { x: this.x + cos * 0.5, y: this.y + sin * 0.5 };
+    const chestPos = { x: this.x + sideCos * animState.bodySway, y: this.y + sideSin * animState.bodySway };
+    const pelvisPos = { x: this.x - cos * 2.0, y: this.y - sin * 2.0 };
+
+    const lHand = {
+      x: chestPos.x - sideCos * 3.0 - cos * animState.armSwing * 0.6,
+      y: chestPos.y - sideSin * 3.0 - sin * animState.armSwing * 0.6
+    };
+    const rHand = {
+      x: chestPos.x + sideCos * 3.0 + cos * animState.armSwing * 0.6,
+      y: chestPos.y + sideSin * 3.0 + sin * animState.armSwing * 0.6
+    };
+
+    return { head: headPos, chest: chestPos, pelvis: pelvisPos, lHand, rHand, lFoot: animState.lFoot, rFoot: animState.rFoot, spd };
+  }
+}
+
+// --- 初期配置データ ---
+let walls = [
+  { x1: 120, y1: 0,   x2: 120, y2: 70, type: 'concrete' },
+  { x1: 120, y1: 94,  x2: 120, y2: 180, type: 'wood', hp: 100 }
+];
+let initialWalls = walls.map(w => ({ ...w })); // リセット時復元用バックアップ（燃えて消えた木壁も復元する）
+let doors = [new Door(120, 70, 22, Math.PI / 2, 'wood')];
+let furnitures = [
+  new Furniture('desk', 60, 60, 0),
+  new Furniture('chair', 60, 72, 0),
+  new Furniture('bed', 40, 140, Math.PI / 2),
+  new Furniture('shelf', 90, 30, 0),
+  new Furniture('tv', 170, 40, Math.PI),
+  new Furniture('phone', 60, 54, 0),
+  new Furniture('washer', 200, 150, 0),
+  new Furniture('clock', 120, 12, 0)
+];
+let boxes = [new WoodBox(40, 50)];
+let extinguishers = [new Extinguisher(75, 90)];
+let ropes = [new Rope(80, 50), new Rope(50, 130)];
+let fires = [new Fire(170, 85)];
+let initialFires = [{ x: 170, y: 85, maxRadius: 13.0 }]; // リセット時復元用バックアップ
+let bandits = [new Bandit(180, 120), new Bandit(200, 50)];
+let firefighters = [new Firefighter(50, 90)];
+
+let foamParticles = [];
+let ropeCutParticles = [];
+let smokeParticles = [];
+
+let carriedBox = null;
+let carriedExtinguisher = null;
+let carriedRope = null;
+
+function updateStats() {
+  document.getElementById('stat-walls').innerText = walls.length;
+  document.getElementById('stat-doors').innerText = doors.length;
+  document.getElementById('stat-furnitures').innerText = furnitures.length;
+  document.getElementById('stat-boxes').innerText = boxes.length;
+  document.getElementById('stat-exts').innerText = extinguishers.length;
+  document.getElementById('stat-fires').innerText = fires.length;
+  document.getElementById('stat-ropes').innerText = ropes.length;
+  document.getElementById('stat-bandits').innerText = bandits.length;
+  document.getElementById('stat-firefighters').innerText = firefighters.length;
+}
+
+// 火災ゲージ表示の更新
+function updateFireGauge() {
+  const fill = document.getElementById('fire-gauge-fill');
+  const text = document.getElementById('fire-gauge-text');
+  if (!fill || !text) return;
+
+  const count = fires.length;
+  if (!isClearMode) {
+    fill.style.width = '100%';
+    fill.style.background = '#00cc66';
+    text.innerText = `${count} (フリーモード: 無制限)`;
+  } else {
+    const ratio = Math.min(100, (count / maxFireLimit) * 100);
+    fill.style.width = `${ratio}%`;
+    fill.style.background = ratio > 75 ? '#ff2200' : (ratio > 40 ? '#ffaa00' : '#ffff00');
+    text.innerText = `${count} / ${maxFireLimit}`;
+  }
+}
+
+// --- プレイヤー ---
+class Player {
+  constructor() {
+    this.x = spawnPoint.x;
+    this.y = spawnPoint.y;
+    this.vx = 0;
+    this.vy = 0;
+    this.angle = 0;
+    this.anim = new CharacterAnimation();
+
+    this.rReachProgress = 0;
+    this.lInteractProgress = 0;
+  }
+
+  update() {
+    if (isGameOver || isGameClear) {
+      this.vx = 0; this.vy = 0;
+      return { speed: 0, isDashing: false, rReachProgress: 0, nodes: this.getNodesForGameOver() };
+    }
+
+    let inputX = (keys.d ? 1 : 0) - (keys.a ? 1 : 0);
+    let inputY = (keys.s ? 1 : 0) - (keys.w ? 1 : 0);
+
+    if (inputX !== 0 && inputY !== 0) {
+      inputX *= 0.7071;
+      inputY *= 0.7071;
+    }
+
+    const isDashing = keys.shift && (inputX !== 0 || inputY !== 0);
+    const ACCEL = isDashing ? 0.36 : 0.18;
+    const FRICTION = isDashing ? 0.80 : 0.74;
+
+    this.vx = (this.vx + inputX * ACCEL) * FRICTION;
+    this.vy = (this.vy + inputY * ACCEL) * FRICTION;
+
+    if (carriedExtinguisher && keys.space) {
+      this.vx -= Math.cos(this.angle) * 0.12;
+      this.vy -= Math.sin(this.angle) * 0.12;
+    }
+
+    let nextX = this.x + this.vx;
+    let nextY = this.y + this.vy;
+
+    doors.forEach(d => d.update(nextX, nextY));
+
+    const charRadius = 4.2;
+
+    for (let iter = 0; iter < 3; iter++) {
+      doors.forEach(d => {
+        const dEnd = d.getEndPos();
+        const col = collideCircleSegment(nextX, nextY, charRadius, d.hx, d.hy, dEnd.x, dEnd.y);
+        nextX = col.x; nextY = col.y;
+      });
+
+      walls.forEach(w => {
+        const col = collideCircleSegment(nextX, nextY, charRadius, w.x1, w.y1, w.x2, w.y2);
+        nextX = col.x; nextY = col.y;
+      });
+
+      furnitures.forEach(f => {
+        const col = collideCircleRotatedRect(nextX, nextY, charRadius, f.x, f.y, f.w, f.h, f.angle);
+        nextX = col.x; nextY = col.y;
+      });
+    }
+
+    this.x = Math.max(10, Math.min(WIDTH - 10, nextX));
+    this.y = Math.max(10, Math.min(HEIGHT - 10, nextY));
+
+    const speed = Math.hypot(this.vx, this.vy);
+
+    if (speed > 0.05) {
+      const targetAngle = Math.atan2(this.vy, this.vx);
+      let diff = targetAngle - this.angle;
+      while (diff < -Math.PI) diff += Math.PI * 2;
+      while (diff > Math.PI) diff -= Math.PI * 2;
+      this.angle += diff * (isDashing ? 0.32 : 0.22);
+    }
+
+    this.rReachProgress += isLightOn ? 0.15 : -0.15;
+    this.rReachProgress = Math.max(0, Math.min(1, this.rReachProgress));
+
+    const hasHeldItem = carriedBox || carriedExtinguisher || carriedRope || doors.some(d => d.isHeld) || keys.e;
+    const targetLProgress = hasHeldItem ? 1.0 : 0.0;
+    this.lInteractProgress += (targetLProgress - this.lInteractProgress) * 0.25;
+
+    const animState = this.anim.update(this.x, this.y, this.angle, speed, isDashing);
+
+    const cos = Math.cos(this.angle);
+    const sin = Math.sin(this.angle);
+    const sideCos = Math.cos(this.angle + Math.PI / 2);
+    const sideSin = Math.sin(this.angle + Math.PI / 2);
+
+    const headPos = { x: this.x + cos * 0.5, y: this.y + sin * 0.5 };
+    const chestPos = { x: this.x + sideCos * animState.bodySway, y: this.y + sideSin * animState.bodySway };
+    const pelvisPos = { x: this.x - cos * 2.0, y: this.y - sin * 2.0 };
+
+    if (carriedBox) {
+      let bX = chestPos.x + cos * 7.0 - sideCos * 0.5;
+      let bY = chestPos.y + sin * 7.0 - sideSin * 0.5;
+      carriedBox.x += (bX - carriedBox.x) * 0.45;
+      carriedBox.y += (bY - carriedBox.y) * 0.45;
+    }
+
+    if (carriedExtinguisher) {
+      let eX = chestPos.x + cos * 6.5 - sideCos * 0.5;
+      let eY = chestPos.y + sin * 6.5 - sideSin * 0.5;
+      carriedExtinguisher.x += (eX - carriedExtinguisher.x) * 0.5;
+      carriedExtinguisher.y += (eY - carriedExtinguisher.y) * 0.5;
+
+      if (keys.space && !isGameOver && !isGameClear) {
+        const muzzleX = carriedExtinguisher.x + cos * 4;
+        const muzzleY = carriedExtinguisher.y + sin * 4;
+        for (let i = 0; i < 3; i++) {
+          foamParticles.push(new FoamParticle(muzzleX, muzzleY, this.angle));
+        }
+      }
+    }
+
+    if (carriedRope) {
+      let rX = chestPos.x + cos * 6.0;
+      let rY = chestPos.y + sin * 6.0;
+      carriedRope.x += (rX - carriedRope.x) * 0.5;
+      carriedRope.y += (rY - carriedRope.y) * 0.5;
+    }
+
+    const defaultLHand = {
+      x: chestPos.x - sideCos * 3.0 - cos * animState.armSwing * 0.6,
+      y: chestPos.y - sideSin * 3.0 - sin * animState.armSwing * 0.6
+    };
+
+    let extendedLHand = {
+      x: chestPos.x - sideCos * 1.5 + cos * 7.0,
+      y: chestPos.y - sideSin * 1.5 + sin * 7.0
+    };
+
+    if (carriedBox) extendedLHand = { x: carriedBox.x, y: carriedBox.y };
+    else if (carriedExtinguisher) extendedLHand = { x: carriedExtinguisher.x, y: carriedExtinguisher.y };
+    else if (carriedRope) extendedLHand = { x: carriedRope.x, y: carriedRope.y };
+    else {
+      const heldDoor = doors.find(d => d.isHeld);
+      if (heldDoor) extendedLHand = heldDoor.getKnobPos();
+    }
+
+    const lHand = {
+      x: defaultLHand.x + (extendedLHand.x - defaultLHand.x) * this.lInteractProgress,
+      y: defaultLHand.y + (extendedLHand.y - defaultLHand.y) * this.lInteractProgress
+    };
+
+    const rReachDist = 2 + this.rReachProgress * 6;
+    const rSideDist = 3.0 - this.rReachProgress * 1.0;
+    const rHandSwing = animState.armSwing * (1.0 - this.rReachProgress);
+
+    const rHand = {
+      x: chestPos.x + sideCos * rSideDist + cos * (rReachDist + rHandSwing),
+      y: chestPos.y + sideSin * rSideDist + sin * (rReachDist + rHandSwing)
+    };
+
+    return {
+      speed,
+      isDashing,
+      rReachProgress: this.rReachProgress,
+      nodes: { head: headPos, chest: chestPos, pelvis: pelvisPos, lHand, rHand, lFoot: animState.lFoot, rFoot: animState.rFoot }
+    };
+  }
+
+  getNodesForGameOver() {
+    return {
+      head: { x: this.x, y: this.y },
+      chest: { x: this.x, y: this.y },
+      pelvis: { x: this.x, y: this.y },
+      lHand: { x: this.x - 2, y: this.y },
+      rHand: { x: this.x + 2, y: this.y },
+      lFoot: { x: this.x - 2, y: this.y + 3 },
+      rFoot: { x: this.x + 2, y: this.y + 3 }
+    };
+  }
+}
+
+const player = new Player();
+const playerParticles = [];
+nodeDistribution.forEach(d => {
+  for (let i = 0; i < d.count; i++) playerParticles.push(new CoreParticle(d.name));
+});
+
+// リトライ・状態リセット
+function resetPlayState() {
+  isGameOver = false;
+  isGameClear = false;
+  gameOverAlpha = 0;
+  gameClearAlpha = 0;
+
+  // 1. 火の初期配置復元
+  fires = initialFires.map(f => new Fire(f.x, f.y, f.maxRadius || 13.0));
+
+  // 1.5. 壁の初期配置復元（燃えて朽ちた木壁も含めてマップを元に戻す）
+  walls = initialWalls.map(w => ({ ...w }));
+
+  // 2. プレイヤー位置リセット
+  player.x = spawnPoint.x;
+  player.y = spawnPoint.y;
+  player.vx = 0; player.vy = 0;
+  carriedBox = null;
+  carriedExtinguisher = null;
+  carriedRope = null;
+
+  // 3. 敵（バンディット）のリセット
+  bandits.forEach(b => b.reset());
+
+  // 4. 消防士のリセット
+  firefighters.forEach(ff => ff.reset());
+
+  // 消火泡・縄破片パーティクルのクリア
+  foamParticles = [];
+  ropeCutParticles = [];
+  smokeParticles = [];
+
+  if (isEditMode) updateStats();
+}
+
+// ヘルプおよびエディタパネル非表示切り替え関数
+function toggleHelp() {
+  showHelp = !showHelp;
+  const hint = document.getElementById('controls-hint');
+  if (hint) hint.style.display = showHelp ? 'block' : 'none';
+
+  const panel = document.getElementById('editor-panel');
+  if (panel && isEditMode) {
+    panel.style.display = showHelp ? 'block' : 'none';
+  }
+}
+
+// 火のみ削除関数
+function clearAllFires() {
+  fires = [];
+  initialFires = [];
+  smokeParticles = [];
+  if (isEditMode) updateStats();
+}
+
+// --- キー入力 ---
+window.addEventListener('keydown', ev => {
+  const k = ev.key.toLowerCase();
+  
+  if (ev.key === 'Tab') {
+    ev.preventDefault();
+    isEditMode = !isEditMode;
+    const modeLabel = document.getElementById('mode-label');
+    const panel = document.getElementById('editor-panel');
+    modeLabel.innerText = isEditMode ? 'EDIT MODE' : 'PLAY MODE';
+    modeLabel.className = `badge ${isEditMode ? 'edit-badge' : 'play-badge'}`;
+    if (panel) panel.style.display = (isEditMode && showHelp) ? 'block' : 'none';
+    setUiLayerEditVisibility(isEditMode);
+    
+    if (isEditMode) {
+      updateStats();
+      applyEditorCameraTransform();
+    } else {
+      // エディタからゲームモード開始時: 配置した火・壁を初期状態として保存しゲーム開始
+      initialFires = fires.map(f => ({ x: f.x, y: f.y, maxRadius: f.maxRadius }));
+      initialWalls = walls.map(w => ({ ...w }));
+      resetPlayState();
+      canvas.style.transform = '';
+    }
+    return;
+  }
+
+  if (k === 'h') {
+    toggleHelp();
+    return;
+  }
+
+  if ((isGameOver || isGameClear) && k === 'r') {
+    resetPlayState();
+    return;
+  }
+
+  if (ev.key === ' ' || ev.key === 'Spacebar') {
+    keys.space = true;
+    ev.preventDefault();
+
+    if (carriedRope && !isGameOver && !isGameClear) {
+      let targetBandit = bandits.find(b => !b.isTied && !b.isNeutralized && Math.hypot(player.x - b.x, player.y - b.y) < 22);
+      if (targetBandit) {
+        targetBandit.isTied = true;
+        targetBandit.tiedTimer = 600;
+        ropes = ropes.filter(r => r !== carriedRope);
+        carriedRope = null;
+        if (isEditMode) updateStats();
+      }
+    }
+  }
+
+  if (isEditMode) {
+    if (ev.ctrlKey && k === 'z') { ev.preventDefault(); if (ev.shiftKey) doRedo(); else doUndo(); return; }
+    if (ev.ctrlKey && k === 'y') { ev.preventDefault(); doRedo(); return; }
+
+    if (k === 'arrowleft') { camKeys.left = true; ev.preventDefault(); }
+    if (k === 'arrowright') { camKeys.right = true; ev.preventDefault(); }
+    if (k === 'arrowup') { camKeys.up = true; ev.preventDefault(); }
+    if (k === 'arrowdown') { camKeys.down = true; ev.preventDefault(); }
+
+    if (k === 's') setTool('spawn');
+    if (k === '1') setTool('wall');
+    if (k === '2') setTool('door');
+    if (k === '3') setTool('desk');
+    if (k === '4') setTool('chair');
+    if (k === '5') setTool('bed');
+    if (k === '6') setTool('shelf');
+    if (k === '7') setTool('tv');
+    if (k === '8') setTool('phone');
+    if (k === '9') setTool('washer');
+    if (k === 'c') setTool('clock');
+    if (k === '0') setTool('erase');
+
+    if (k === 'r') {
+      itemRotateAngle = (itemRotateAngle + Math.PI / 2) % (Math.PI * 2);
+    }
+    return;
+  }
+
+  if (k === 'shift') keys.shift = true;
+  if (k in keys) keys[k] = true;
+  if (k === 'f') isLightOn = !isLightOn;
+
+  if (k === 'e' && !ev.repeat && !isGameOver && !isGameClear) {
+    if (carriedBox) {
+      let tiedBandit = bandits.find(b => b.isTied && !b.isNeutralized && Math.hypot(carriedBox.x - b.x, carriedBox.y - b.y) < 18);
+      if (tiedBandit) {
+        tiedBandit.isNeutralized = true;
+        tiedBandit.isTied = true;
+        boxes = boxes.filter(b => b !== carriedBox);
+        carriedBox = null;
+        keys.e = false;
+        if (isEditMode) updateStats();
+        return;
+      }
+    }
+
+    if (carriedBox) {
+      carriedBox.isCarried = false; carriedBox = null; keys.e = false;
+    } else if (carriedExtinguisher) {
+      carriedExtinguisher.isCarried = false; carriedExtinguisher = null; keys.e = false;
+    } else if (carriedRope) {
+      carriedRope.isCarried = false; carriedRope = null; keys.e = false;
+    } else {
+      let activeDoor = doors.find(d => d.isHeld);
+      if (activeDoor) {
+        activeDoor.isHeld = false; keys.e = false;
+      } else {
+        let nearestDoor = null;
+        let minDoorDist = 18;
+        doors.forEach(d => {
+          const knob = d.getKnobPos();
+          const dist = Math.hypot(player.x - knob.x, player.y - knob.y);
+          if (dist < minDoorDist) { minDoorDist = dist; nearestDoor = d; }
+        });
+
+        if (nearestDoor) {
+          nearestDoor.startHold(player.x, player.y);
+        } else {
+          let minDist = 18;
+          let nearestBox = null, nearestExt = null, nearestRope = null;
+
+          boxes.forEach(b => {
+            const d = Math.hypot(player.x - b.x, player.y - b.y);
+            if (d < minDist) { minDist = d; nearestBox = b; }
+          });
+          extinguishers.forEach(ext => {
+            const d = Math.hypot(player.x - ext.x, player.y - ext.y);
+            if (d < minDist) { minDist = d; nearestExt = ext; nearestBox = null; }
+          });
+          ropes.forEach(rp => {
+            const d = Math.hypot(player.x - rp.x, player.y - rp.y);
+            if (d < minDist) { minDist = d; nearestRope = rp; nearestExt = null; nearestBox = null; }
+          });
+
+          if (nearestBox) { carriedBox = nearestBox; carriedBox.isCarried = true; }
+          else if (nearestExt) { carriedExtinguisher = nearestExt; carriedExtinguisher.isCarried = true; }
+          else if (nearestRope) { carriedRope = nearestRope; carriedRope.isCarried = true; }
+          else { keys.e = true; }
+        }
+      }
+    }
+  }
+});
+
+window.addEventListener('keyup', ev => {
+  const k = ev.key.toLowerCase();
+  if (ev.key === ' ' || ev.key === 'Spacebar') keys.space = false;
+  if (k === 'shift') keys.shift = false;
+  if (k in keys) keys[k] = false;
+  if (k === 'e' && !carriedBox && !carriedExtinguisher && !carriedRope && !doors.some(d => d.isHeld)) keys.e = false;
+
+  if (k === 'arrowleft') camKeys.left = false;
+  if (k === 'arrowright') camKeys.right = false;
+  if (k === 'arrowup') camKeys.up = false;
+  if (k === 'arrowdown') camKeys.down = false;
+});
+
+// --- エディタ: マウスホイールでズーム（カーソル位置を中心に） ---
+canvas.addEventListener('wheel', e => {
+  if (!isEditMode) return;
+  e.preventDefault();
+
+  const rect = canvas.getBoundingClientRect();
+  const cursorRatioX = (e.clientX - rect.left) / rect.width;
+  const cursorRatioY = (e.clientY - rect.top) / rect.height;
+  // 現在のワールド座標（クランプ前）
+  const worldX = editorCamera.x + cursorRatioX * (WIDTH / editorCamera.zoom);
+  const worldY = editorCamera.y + cursorRatioY * (HEIGHT / editorCamera.zoom);
+
+  const zoomFactor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+  editorCamera.zoom = Math.max(1, Math.min(6, editorCamera.zoom * zoomFactor));
+
+  editorCamera.x = worldX - cursorRatioX * (WIDTH / editorCamera.zoom);
+  editorCamera.y = worldY - cursorRatioY * (HEIGHT / editorCamera.zoom);
+  clampEditorCamera();
+  applyEditorCameraTransform();
+}, { passive: false });
+
+window.addEventListener('resize', () => { if (isEditMode) applyEditorCameraTransform(); });
+
+// --- マウス操作 ---
+function getMousePos(e) {
+  const rect = canvas.getBoundingClientRect();
+  let x = (e.clientX - rect.left) / rect.width * WIDTH;
+  let y = (e.clientY - rect.top) / rect.height * HEIGHT;
+
+  // キャンバスの外に少しはみ出してもステージ端(0〜WIDTH/HEIGHT)にクランプする。
+  // これにより端っこギリギリの壁作成・削除・設置がしやすくなる。
+  x = Math.max(0, Math.min(WIDTH, x));
+  y = Math.max(0, Math.min(HEIGHT, y));
+
+  if (snapToGrid) {
+    x = Math.round(x / 8) * 8;
+    y = Math.round(y / 8) * 8;
+    x = Math.max(0, Math.min(WIDTH, x));
+    y = Math.max(0, Math.min(HEIGHT, y));
+  }
+  return { x, y };
+}
+
+canvas.addEventListener('mousemove', e => {
+  currentMousePos = getMousePos(e);
+  isMouseInCanvas = true;
+});
+
+canvas.addEventListener('mouseleave', () => {
+  isMouseInCanvas = false;
+  // 壁作成中にカーソルがキャンバス外に出ても始点は保持する。
+  // (端っこに壁を引く際、キャンバスの外へ少しはみ出すとリセットされてしまう問題への対処)
+});
+
+const furnitureTypes = ['desk', 'chair', 'bed', 'shelf', 'tv', 'phone', 'washer', 'clock', 'fridge', 'sofa', 'sink', 'plant', 'tree', 'lamp'];
+
+canvas.addEventListener('mousedown', e => {
+  if (!isEditMode) return;
+  const m = getMousePos(e);
+
+  if (currentTool === 'template-capture') {
+    templateCaptureStart = m;
+    return;
+  } else if (currentTool === 'template-stamp') {
+    if (activeTemplateName) stampTemplateAt(activeTemplateName, m.x, m.y);
+    return;
+  }
+
+  // これ以降はマップを変更する操作なので、Undo用のスナップショットを積んでおく
+  // (壁だけはドラッグ完了時=mouseup側で積む)
+  if (currentTool !== 'wall') pushUndo();
+
+  if (currentTool === 'spawn') {
+    spawnPoint = { x: m.x, y: m.y };
+  } else if (currentTool === 'wall') {
+    wallStartPoint = m;
+  } else if (currentTool === 'door') {
+    const dType = document.getElementById('sel-door-type').value;
+    doors.push(new Door(m.x, m.y, 22, itemRotateAngle, dType));
+  } else if (furnitureTypes.includes(currentTool)) {
+    furnitures.push(new Furniture(currentTool, m.x, m.y, itemRotateAngle));
+  } else if (currentTool === 'box') {
+    boxes.push(new WoodBox(m.x, m.y));
+  } else if (currentTool === 'extinguisher') {
+    extinguishers.push(new Extinguisher(m.x, m.y));
+  } else if (currentTool === 'fire') {
+    fires.push(new Fire(m.x, m.y));
+    initialFires.push({ x: m.x, y: m.y, maxRadius: 13.0 });
+  } else if (currentTool === 'rope') {
+    ropes.push(new Rope(m.x, m.y));
+  } else if (currentTool === 'bandit') {
+    bandits.push(new Bandit(m.x, m.y));
+  } else if (currentTool === 'firefighter') {
+    firefighters.push(new Firefighter(m.x, m.y));
+  } else if (currentTool === 'erase') {
+    const radius = 12;
+    const distToSegment = (px, py, x1, y1, x2, y2) => {
+      const dx = x2 - x1, dy = y2 - y1;
+      const lenSq = dx * dx + dy * dy;
+      let t = lenSq === 0 ? 0 : ((px - x1) * dx + (py - y1) * dy) / lenSq;
+      t = Math.max(0, Math.min(1, t));
+      const cx = x1 + t * dx, cy = y1 + t * dy;
+      return Math.hypot(px - cx, py - cy);
+    };
+    walls = walls.filter(w => distToSegment(m.x, m.y, w.x1, w.y1, w.x2, w.y2) > radius);
+    doors = doors.filter(d => Math.hypot(m.x - d.hx, m.y - d.hy) > radius);
+    furnitures = furnitures.filter(f => Math.hypot(m.x - f.x, m.y - f.y) > radius);
+    boxes = boxes.filter(b => Math.hypot(m.x - b.x, m.y - b.y) > radius);
+    extinguishers = extinguishers.filter(ext => Math.hypot(m.x - ext.x, m.y - ext.y) > radius);
+    fires = fires.filter(f => Math.hypot(m.x - f.x, m.y - f.y) > radius);
+    initialFires = initialFires.filter(f => Math.hypot(m.x - f.x, m.y - f.y) > radius);
+    ropes = ropes.filter(r => Math.hypot(m.x - r.x, m.y - r.y) > radius);
+    bandits = bandits.filter(b => Math.hypot(m.x - b.x, m.y - b.y) > radius);
+    firefighters = firefighters.filter(ff => Math.hypot(m.x - ff.x, m.y - ff.y) > radius);
+  }
+  updateStats();
+});
+
+// canvasではなくwindowでmouseupを受ける。
+// ステージ端に壁を引くとき、マウスがキャンバス範囲を少しはみ出したまま
+// ボタンを離すことが多く、canvas限定のmouseupだと壁が確定しなかったため。
+window.addEventListener('mouseup', e => {
+  if (!isEditMode) return;
+
+  if (currentTool === 'template-capture' && templateCaptureStart) {
+    const m = getMousePos(e);
+    if (Math.hypot(m.x - templateCaptureStart.x, m.y - templateCaptureStart.y) > 4) {
+      captureTemplateFromRect(templateCaptureStart.x, templateCaptureStart.y, m.x, m.y);
+    }
+    templateCaptureStart = null;
+    return;
+  }
+
+  if (currentTool !== 'wall' || !wallStartPoint) return;
+  const m = getMousePos(e);
+  if (Math.hypot(m.x - wallStartPoint.x, m.y - wallStartPoint.y) > 4) {
+    pushUndo();
+    const type = document.getElementById('sel-wall-type').value;
+    walls.push({ x1: wallStartPoint.x, y1: wallStartPoint.y, x2: m.x, y2: m.y, type, hp: type === 'wood' ? 100 : undefined });
+    updateStats();
+  }
+  wallStartPoint = null;
+});
+
+function setTool(tool) {
+  currentTool = tool;
+  document.querySelectorAll('.tool-btn').forEach(b => {
+    if (!b.classList.contains('danger-btn')) b.classList.remove('active');
+  });
+  const btnId = `btn-tool-${tool === 'extinguisher' ? 'ext' : tool}`;
+  const el = document.getElementById(btnId);
+  if (el) el.classList.add('active');
+}
+
+function clearAllObjects() {
+  if (confirm('すべてのオブジェクトを削除しますか？')) {
+    walls = []; doors = []; furnitures = []; boxes = []; extinguishers = []; fires = []; initialFires = []; ropes = []; bandits = []; firefighters = []; smokeParticles = [];
+    updateStats();
+  }
+}
+
+document.getElementById('chk-snap').onchange = (e) => snapToGrid = e.target.checked;
+
+function buildMapDataObject() {
+  return {
+    stageSize: `${WIDTH}x${HEIGHT}`,
+    isClearMode,
+    maxFireLimit,
+    mapEnvironment,
+    windAngle,
+    windStrength,
+    spawnPoint,
+    walls,
+    doors: doors.map(d => ({ hx: d.hx, hy: d.hy, length: d.length, angle: d.baseAngle, type: d.type || 'wood' })),
+    furnitures: furnitures.map(f => ({ type: f.type, x: f.x, y: f.y, angle: f.angle })),
+    boxes: boxes.map(b => ({ x: b.x, y: b.y })),
+    extinguishers: extinguishers.map(e => ({ x: e.x, y: e.y })),
+    fires: fires.map(f => ({ x: f.x, y: f.y })),
+    ropes: ropes.map(r => ({ x: r.x, y: r.y })),
+    bandits: bandits.map(b => ({ x: b.startX, y: b.startY })),
+    firefighters: firefighters.map(ff => ({ x: ff.startX, y: ff.startY }))
+  };
+}
+
+function applyMapDataObject(data) {
+  if (data.stageSize) {
+    document.getElementById('sel-stage-size').value = data.stageSize;
+    changeStageSize(data.stageSize);
+  }
+  if (data.isClearMode !== undefined) {
+    isClearMode = data.isClearMode;
+    document.getElementById('sel-game-mode').value = isClearMode ? 'clear' : 'free';
+  }
+  if (data.maxFireLimit !== undefined) {
+    maxFireLimit = data.maxFireLimit;
+    document.getElementById('num-fire-limit').value = maxFireLimit;
+  }
+  if (data.mapEnvironment) {
+    mapEnvironment = data.mapEnvironment;
+    document.getElementById('sel-environment').value = mapEnvironment;
+  }
+  if (data.windAngle !== undefined) {
+    windAngle = data.windAngle;
+    document.getElementById('range-wind-angle').value = Math.round(windAngle * 180 / Math.PI);
+  }
+  if (data.windStrength !== undefined) {
+    windStrength = data.windStrength;
+    document.getElementById('num-wind-strength').value = windStrength;
+  }
+  updateWindDisplay();
+  if (data.spawnPoint) spawnPoint = data.spawnPoint;
+  if (data.walls) { walls = data.walls; initialWalls = walls.map(w => ({ ...w })); }
+  if (data.doors) doors = data.doors.map(d => new Door(d.hx, d.hy, d.length || 22, d.angle, d.type || 'wood'));
+  if (data.furnitures) {
+    furnitures = data.furnitures.map(f => new Furniture(f.type, f.x, f.y, f.angle || 0));
+  }
+  if (data.boxes) boxes = data.boxes.map(b => new WoodBox(b.x, b.y));
+  if (data.extinguishers) extinguishers = data.extinguishers.map(e => new Extinguisher(e.x, e.y));
+  if (data.fires) {
+    fires = data.fires.map(f => new Fire(f.x, f.y));
+    initialFires = fires.map(f => ({ x: f.x, y: f.y, maxRadius: f.maxRadius }));
+  }
+  if (data.ropes) ropes = data.ropes.map(r => new Rope(r.x, r.y));
+  if (data.bandits) bandits = data.bandits.map(b => new Bandit(b.x, b.y));
+  if (data.firefighters) firefighters = data.firefighters.map(ff => new Firefighter(ff.x, ff.y));
+  updateStats();
+  resetPlayState();
+  undoStack = [];
+  redoStack = [];
+}
+
+function exportMapData() {
+  document.getElementById('json-io').value = JSON.stringify(buildMapDataObject());
+}
+
+function importMapData() {
+  try {
+    const data = JSON.parse(document.getElementById('json-io').value);
+    applyMapDataObject(data);
+    alert('マップデータを読み込みました！');
+  } catch(e) {
+    alert('JSONフォーマットが正しくありません。');
+  }
+}
+
+// 回転可能な要素のピクセル描画ヘルパー
+function drawRotatedPattern(fx, fy, w, h, angle, pixelCallback) {
+  const cos = Math.cos(-angle);
+  const sin = Math.sin(-angle);
+  const halfW = w / 2;
+  const halfH = h / 2;
+  const diag = Math.ceil(Math.hypot(halfW, halfH));
+
+  const minX = Math.max(0, Math.floor(fx - diag));
+  const maxX = Math.min(WIDTH - 1, Math.ceil(fx + diag));
+  const minY = Math.max(0, Math.floor(fy - diag));
+  const maxY = Math.min(HEIGHT - 1, Math.ceil(fy + diag));
+
+  for (let py = minY; py <= maxY; py++) {
+    for (let px = minX; px <= maxX; px++) {
+      const dx = px - fx;
+      const dy = py - fy;
+      const lx = dx * cos - dy * sin;
+      const ly = dx * sin + dy * cos;
+
+      if (Math.abs(lx) <= halfW && Math.abs(ly) <= halfH) {
+        const pIdx = (py * WIDTH + px) * 4;
+        pixelCallback(lx, ly, pIdx, pixels);
+      }
+    }
+  }
+}
+
+// 家具のピクセル描画
+function renderFurniture(f) {
+  const hw = f.w / 2;
+  const hh = f.h / 2;
+
+  drawRotatedPattern(f.x, f.y, f.w, f.h, f.angle, (lx, ly, pIdx, pixels) => {
+    const isEdge = (Math.abs(lx) >= hw - 0.9 || Math.abs(ly) >= hh - 0.9);
+
+    switch(f.type) {
+      case 'desk':
+        if (isEdge) {
+          pixels[pIdx] = 70; pixels[pIdx+1] = 45; pixels[pIdx+2] = 20;
+        } else {
+          pixels[pIdx] = 140; pixels[pIdx+1] = 95; pixels[pIdx+2] = 50;
+        }
+        break;
+
+      case 'chair':
+        if (ly < -hh + 2) {
+          pixels[pIdx] = 30; pixels[pIdx+1] = 50; pixels[pIdx+2] = 80;
+        } else if (isEdge) {
+          pixels[pIdx] = 40; pixels[pIdx+1] = 70; pixels[pIdx+2] = 110;
+        } else {
+          pixels[pIdx] = 80; pixels[pIdx+1] = 120; pixels[pIdx+2] = 180;
+        }
+        break;
+
+      case 'bed':
+        if (isEdge) {
+          pixels[pIdx] = 90; pixels[pIdx+1] = 60; pixels[pIdx+2] = 30;
+        } else if (ly < -hh + 5) {
+          pixels[pIdx] = 230; pixels[pIdx+1] = 230; pixels[pIdx+2] = 240;
+        } else if (ly < -hh + 7) {
+          pixels[pIdx] = 160; pixels[pIdx+1] = 160; pixels[pIdx+2] = 170;
+        } else {
+          const stripe = (Math.floor(lx + ly) % 4 === 0);
+          pixels[pIdx] = stripe ? 40 : 60;
+          pixels[pIdx+1] = stripe ? 100 : 140;
+          pixels[pIdx+2] = stripe ? 180 : 220;
+        }
+        break;
+
+      case 'shelf':
+        if (isEdge) {
+          pixels[pIdx] = 80; pixels[pIdx+1] = 50; pixels[pIdx+2] = 25;
+        } else {
+          const colIndex = Math.floor(Math.abs(lx + hw) % 5);
+          if (colIndex === 0) { pixels[pIdx] = 180; pixels[pIdx+1] = 40; pixels[pIdx+2] = 40; }
+          else if (colIndex === 1) { pixels[pIdx] = 40; pixels[pIdx+1] = 140; pixels[pIdx+2] = 60; }
+          else if (colIndex === 2) { pixels[pIdx] = 200; pixels[pIdx+1] = 180; pixels[pIdx+2] = 50; }
+          else if (colIndex === 3) { pixels[pIdx] = 50; pixels[pIdx+1] = 90; pixels[pIdx+2] = 180; }
+          else { pixels[pIdx] = 130; pixels[pIdx+1] = 70; pixels[pIdx+2] = 160; }
+        }
+        break;
+
+      case 'tv':
+        if (isEdge) {
+          pixels[pIdx] = 30; pixels[pIdx+1] = 30; pixels[pIdx+2] = 35;
+        } else if (ly >= -hh + 2 && ly <= hh - 2 && lx >= -hw + 2 && lx <= hw - 2) {
+          const flicker = (Math.random() < 0.15);
+          pixels[pIdx] = flicker ? 200 : 20;
+          pixels[pIdx+1] = flicker ? 220 : 120;
+          pixels[pIdx+2] = flicker ? 255 : 180;
+        } else {
+          pixels[pIdx] = 50; pixels[pIdx+1] = 50; pixels[pIdx+2] = 55;
+        }
+        break;
+
+      case 'phone':
+        if (isEdge) {
+          pixels[pIdx] = 100; pixels[pIdx+1] = 65; pixels[pIdx+2] = 35;
+        } else {
+          if (lx < -1) {
+            pixels[pIdx] = 220; pixels[pIdx+1] = 220; pixels[pIdx+2] = 230;
+          } else {
+            const dot = ((Math.floor(lx) + Math.floor(ly)) % 2 === 0);
+            pixels[pIdx] = dot ? 50 : 180;
+            pixels[pIdx+1] = dot ? 50 : 180;
+            pixels[pIdx+2] = dot ? 50 : 190;
+          }
+        }
+        break;
+
+      case 'washer':
+        if (isEdge) {
+          pixels[pIdx] = 180; pixels[pIdx+1] = 185; pixels[pIdx+2] = 190;
+        } else {
+          const distFromCenter = Math.hypot(lx, ly + 0.8);
+          if (distFromCenter <= 2.8) {
+            pixels[pIdx] = 50; pixels[pIdx+1] = 130; pixels[pIdx+2] = 200;
+          } else if (ly < -hh + 2) {
+            const btn = (Math.floor(lx) % 2 === 0);
+            pixels[pIdx] = btn ? 230 : 100;
+            pixels[pIdx+1] = btn ? 50 : 100;
+            pixels[pIdx+2] = btn ? 50 : 110;
+          } else {
+            pixels[pIdx] = 220; pixels[pIdx+1] = 225; pixels[pIdx+2] = 230;
+          }
+        }
+        break;
+
+      case 'clock':
+        const r = Math.hypot(lx, ly);
+        if (r >= hw - 0.8) {
+          pixels[pIdx] = 180; pixels[pIdx+1] = 120; pixels[pIdx+2] = 40;
+        } else if (Math.abs(lx) <= 0.6 || Math.abs(ly) <= 0.6) {
+          pixels[pIdx] = 20; pixels[pIdx+1] = 20; pixels[pIdx+2] = 20;
+        } else {
+          pixels[pIdx] = 240; pixels[pIdx+1] = 240; pixels[pIdx+2] = 230;
+        }
+        break;
+
+      case 'fridge':
+        if (isEdge) {
+          pixels[pIdx] = 210; pixels[pIdx+1] = 212; pixels[pIdx+2] = 215;
+        } else if (ly < -hh + 4 && ly > -hh + 3) {
+          pixels[pIdx] = 120; pixels[pIdx+1] = 122; pixels[pIdx+2] = 125;
+        } else if (lx > hw - 2.5 && ly < 0) {
+          pixels[pIdx] = 160; pixels[pIdx+1] = 165; pixels[pIdx+2] = 170;
+        } else {
+          pixels[pIdx] = 235; pixels[pIdx+1] = 238; pixels[pIdx+2] = 240;
+        }
+        break;
+
+      case 'sofa':
+        if (isEdge) {
+          pixels[pIdx] = 60; pixels[pIdx+1] = 40; pixels[pIdx+2] = 70;
+        } else if (ly < -hh + 3) {
+          pixels[pIdx] = 90; pixels[pIdx+1] = 60; pixels[pIdx+2] = 110;
+        } else {
+          const cushion = Math.floor((lx + hw) / (f.w / 3));
+          const shade = cushion % 2 === 0 ? 130 : 115;
+          pixels[pIdx] = shade; pixels[pIdx+1] = shade * 0.65; pixels[pIdx+2] = shade + 30;
+        }
+        break;
+
+      case 'sink':
+        if (isEdge) {
+          pixels[pIdx] = 150; pixels[pIdx+1] = 150; pixels[pIdx+2] = 155;
+        } else {
+          const basin = Math.hypot(lx, ly) <= Math.min(hw, hh) - 1.5;
+          if (basin) { pixels[pIdx] = 70; pixels[pIdx+1] = 100; pixels[pIdx+2] = 130; }
+          else { pixels[pIdx] = 210; pixels[pIdx+1] = 212; pixels[pIdx+2] = 215; }
+        }
+        break;
+
+      case 'plant':
+        if (ly > hh - 3) {
+          pixels[pIdx] = 150; pixels[pIdx+1] = 90; pixels[pIdx+2] = 50;
+        } else {
+          const leaf = ((Math.floor(lx * 1.3) + Math.floor(ly * 1.3)) % 3 === 0);
+          pixels[pIdx] = leaf ? 30 : 50;
+          pixels[pIdx+1] = leaf ? 110 : 150;
+          pixels[pIdx+2] = leaf ? 40 : 60;
+        }
+        break;
+
+      case 'tree': {
+        const trunkW = hw * 0.35;
+        if (Math.abs(lx) <= trunkW && ly > hh * 0.15) {
+          // 幹
+          pixels[pIdx] = 90; pixels[pIdx+1] = 60; pixels[pIdx+2] = 35;
+        } else {
+          // 葉（円形、少しノイズをつけて自然に）。円の外は何も描かず背景を活かす
+          const rr = Math.hypot(lx, ly * 0.9 - hh * 0.05);
+          if (rr <= hw - 0.5) {
+            const speck = ((Math.floor(lx * 1.7) + Math.floor(ly * 1.7)) % 4 === 0);
+            pixels[pIdx] = speck ? 20 : 30;
+            pixels[pIdx+1] = speck ? 100 : 130;
+            pixels[pIdx+2] = speck ? 35 : 45;
+          }
+        }
+        break;
+      }
+
+      case 'lamp': {
+        const poleW = hw * 0.3;
+        if (ly > -hh + 3 && Math.abs(lx) <= poleW) {
+          // 支柱
+          pixels[pIdx] = 60; pixels[pIdx+1] = 60; pixels[pIdx+2] = 65;
+        } else if (ly <= -hh + 3) {
+          // 灯り部分（暖色に光る）。円の外は何も描かず背景を活かす
+          const glow = Math.hypot(lx, ly + hh - 1.5) <= hw - 0.5;
+          if (glow) {
+            pixels[pIdx] = 255; pixels[pIdx+1] = 220; pixels[pIdx+2] = 140;
+          } else {
+            pixels[pIdx] = 50; pixels[pIdx+1] = 50; pixels[pIdx+2] = 55;
+          }
+        }
+        break;
+      }
+    }
+  });
+}
+
+// --- 描画メインループ ---
+function render() {
+  // 燃え尽きた木壁を自動削除
+  walls = walls.filter(w => w.type !== 'wood' || w.hp === undefined || w.hp > 0);
+
+  // 火災ゲージのUI更新
+  updateFireGauge();
+
+  // 1. 背景描画
+  const isOutdoor = mapEnvironment === 'outdoor';
+  for (let y = 0; y < HEIGHT; y++) {
+    for (let x = 0; x < WIDTH; x++) {
+      const idx = (y * WIDTH + x) * 4;
+      const isGrid = (x % 16 === 0 || y % 16 === 0);
+      if (isOutdoor) {
+        // 屋外: 草地っぽい緑系の背景（軽いノイズでムラをつける）
+        const noise = ((x * 13 + y * 7) % 9);
+        pixels[idx]     = 10 + noise;
+        pixels[idx + 1] = (isGrid ? 34 : 28) + noise;
+        pixels[idx + 2] = 12 + noise * 0.5;
+      } else {
+        pixels[idx]     = isGrid ? 8  : 3;
+        pixels[idx + 1] = isGrid ? 20 : 8;
+        pixels[idx + 2] = isGrid ? 12 : 5;
+      }
+      pixels[idx + 3] = 255;
+    }
+  }
+
+  // 2. 壁
+  walls.forEach(w => {
+    const type = w.type || 'concrete';
+    const len = Math.hypot(w.x2 - w.x1, w.y2 - w.y1);
+    const steps = Math.max(1, Math.ceil(len));
+
+    let r = 80, g = 85, b = 90;
+    if (type === 'brick') { r = 160; g = 60; b = 45; }
+    else if (type === 'wood') {
+      const hpRatio = (w.hp !== undefined) ? Math.max(0, w.hp / 100) : 1.0;
+      r = Math.floor(130 * hpRatio + 30 * (1 - hpRatio));
+      g = Math.floor(85 * hpRatio + 15 * (1 - hpRatio));
+      b = Math.floor(45 * hpRatio + 10 * (1 - hpRatio));
+    }
+    else if (type === 'glass') { r = 100; g = 200; b = 240; }
+
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      const px = Math.floor(w.x1 + (w.x2 - w.x1) * t);
+      const py = Math.floor(w.y1 + (w.y2 - w.y1) * t);
+
+      for (let tx = -1; tx <= 1; tx++) {
+        for (let ty = -1; ty <= 1; ty++) {
+          const lx = px + tx;
+          const ly = py + ty;
+          if (lx >= 0 && lx < WIDTH && ly >= 0 && ly < HEIGHT) {
+            const pIdx = (ly * WIDTH + lx) * 4;
+            if (type === 'glass' && tx === 0 && ty === 0) {
+              pixels[pIdx]     = 180;
+              pixels[pIdx + 1] = 230;
+              pixels[pIdx + 2] = 255;
+            } else {
+              pixels[pIdx]     = r;
+              pixels[pIdx + 1] = g;
+              pixels[pIdx + 2] = b;
+            }
+          }
+        }
+      }
+    }
+  });
+
+  // 3. ドア
+  doors.forEach(d => {
+    const doorEnd = d.getEndPos();
+    const dx = doorEnd.x - d.hx;
+    const dy = doorEnd.y - d.hy;
+    const steps = Math.ceil(d.length);
+
+    let dr = 110, dg = 70, db = 35;
+    if (d.type === 'iron') { dr = 140; dg = 150; db = 160; }
+
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      const px = Math.floor(d.hx + dx * t);
+      const py = Math.floor(d.hy + dy * t);
+
+      for (let tx = -1; tx <= 1; tx++) {
+        for (let ty = -1; ty <= 1; ty++) {
+          const lx = px + tx;
+          const ly = py + ty;
+          if (lx >= 0 && lx < WIDTH && ly >= 0 && ly < HEIGHT) {
+            const pIdx = (ly * WIDTH + lx) * 4;
+            pixels[pIdx]     = dr;
+            pixels[pIdx + 1] = dg;
+            pixels[pIdx + 2] = db;
+          }
+        }
+      }
+    }
+
+    const knob = d.getKnobPos();
+    const kx = Math.floor(knob.x);
+    const ky = Math.floor(knob.y);
+    for (let oy = -1; oy <= 1; oy++) {
+      for (let ox = -1; ox <= 1; ox++) {
+        const px = kx + ox;
+        const py = ky + oy;
+        if (px >= 0 && px < WIDTH && py >= 0 && py < HEIGHT) {
+          const pIdx = (py * WIDTH + px) * 4;
+          pixels[pIdx]     = d.isHeld ? 0 : (d.type === 'iron' ? 220 : 255);
+          pixels[pIdx + 1] = d.isHeld ? 255 : (d.type === 'iron' ? 220 : 215);
+          pixels[pIdx + 2] = d.isHeld ? 150 : (d.type === 'iron' ? 220 : 0);
+        }
+      }
+    }
+  });
+
+  // 4. 家具
+  furnitures.forEach(f => renderFurniture(f));
+
+  // 5. 木箱
+  boxes.forEach(box => {
+    const half = Math.floor(box.size / 2);
+    const renderY = box.isCarried ? box.y - 2 : box.y;
+
+    for (let oy = -half; oy <= half; oy++) {
+      for (let ox = -half; ox <= half; ox++) {
+        const px = Math.floor(box.x) + ox;
+        const py = Math.floor(renderY) + oy;
+
+        if (px >= 0 && px < WIDTH && py >= 0 && py < HEIGHT) {
+          const pIdx = (py * WIDTH + px) * 4;
+          const isBorder = (Math.abs(ox) === half || Math.abs(oy) === half);
+          pixels[pIdx]     = isBorder ? 60 : 120;
+          pixels[pIdx + 1] = isBorder ? 35 : 75;
+          pixels[pIdx + 2] = isBorder ? 15 : 35;
+        }
+      }
+    }
+  });
+
+  // 6. 消火器
+  extinguishers.forEach(ext => {
+    const renderX = Math.floor(ext.x);
+    const renderY = Math.floor(ext.isCarried ? ext.y - 2 : ext.y);
+
+    for (let dy = -4; dy <= 4; dy++) {
+      for (let dx = -2; dx <= 1; dx++) {
+        const px = renderX + dx;
+        const py = renderY + dy;
+
+        if (px >= 0 && px < WIDTH && py >= 0 && py < HEIGHT) {
+          const pIdx = (py * WIDTH + px) * 4;
+          if (dy <= -2) {
+            pixels[pIdx]     = (dx === 1 && dy === -3) ? 180 : 30;
+            pixels[pIdx + 1] = (dx === 1 && dy === -3) ? 180 : 30;
+            pixels[pIdx + 2] = (dx === 1 && dy === -3) ? 180 : 30;
+          } else {
+            const isEdge = (dx === -2 || dx === 1 || dy === 4);
+            pixels[pIdx]     = isEdge ? 160 : 230;
+            pixels[pIdx + 1] = isEdge ? 10  : 30;
+            pixels[pIdx + 2] = isEdge ? 10  : 30;
+          }
+        }
+      }
+    }
+  });
+
+  // 7. 縄アイテム
+  ropes.forEach(r => {
+    const rx = Math.floor(r.x);
+    const ry = Math.floor(r.isCarried ? r.y - 2 : r.y);
+
+    for (let theta = 0; theta < Math.PI * 4.5; theta += 0.22) {
+      const rad = 0.6 + theta * 0.7;
+      const px = Math.floor(rx + Math.cos(theta) * rad);
+      const py = Math.floor(ry + Math.sin(theta) * rad * 0.75);
+
+      if (px >= 0 && px < WIDTH && py >= 0 && py < HEIGHT) {
+        const pIdx = (py * WIDTH + px) * 4;
+        pixels[pIdx]     = 210;
+        pixels[pIdx + 1] = 160;
+        pixels[pIdx + 2] = 75;
+      }
+    }
+  });
+
+  // 8. 炎
+  fires.forEach(fire => {
+    fire.update();
+    const currentRadius = fire.radius;
+    const rCeil = Math.ceil(currentRadius);
+    const fx = Math.floor(fire.x);
+    const fy = Math.floor(fire.y);
+
+    for (let dy = -rCeil; dy <= rCeil; dy++) {
+      for (let dx = -rCeil; dx <= rCeil; dx++) {
+        const px = fx + dx;
+        const py = fy + dy;
+
+        if (px >= 0 && px < WIDTH && py >= 0 && py < HEIGHT) {
+          const dist = Math.hypot(dx, dy);
+          if (dist <= currentRadius) {
+            const pIdx = (py * WIDTH + px) * 4;
+            const normDist = dist / currentRadius;
+            const flicker = Math.random();
+
+            if (normDist < 0.35 && flicker > 0.2) {
+              pixels[pIdx]     = 255;
+              pixels[pIdx + 1] = 255;
+              pixels[pIdx + 2] = 150;
+            } else if (normDist < 0.75 && flicker > 0.15) {
+              pixels[pIdx]     = 255;
+              pixels[pIdx + 1] = 120 + Math.floor(Math.random() * 60);
+              pixels[pIdx + 2] = 20;
+            } else if (flicker > 0.3) {
+              pixels[pIdx]     = 200 + Math.floor(Math.random() * 55);
+              pixels[pIdx + 1] = 30;
+              pixels[pIdx + 2] = 10;
+            }
+          }
+        }
+      }
+    }
+  });
+
+  // 8.5 煙（炎から発生し、風向きに流されながら漂う）
+  for (let i = smokeParticles.length - 1; i >= 0; i--) {
+    const sp = smokeParticles[i];
+    sp.update();
+    if (sp.life <= 0) { smokeParticles.splice(i, 1); continue; }
+
+    const sx = Math.floor(sp.x);
+    const sy = Math.floor(sp.y);
+    const r = Math.ceil(sp.radius);
+    const baseAlpha = Math.min(0.5, sp.life * 0.5);
+
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        const px = sx + dx;
+        const py = sy + dy;
+        if (px < 0 || px >= WIDTH || py < 0 || py >= HEIGHT) continue;
+        const distSq = dx * dx + dy * dy;
+        if (distSq > sp.radius * sp.radius) continue;
+        const falloff = 1 - Math.sqrt(distSq) / sp.radius;
+        const alpha = baseAlpha * falloff * 0.6;
+        if (alpha <= 0.01) continue;
+        const pIdx = (py * WIDTH + px) * 4;
+        const gray = 50;
+        pixels[pIdx]     += (gray - pixels[pIdx])     * alpha;
+        pixels[pIdx + 1] += (gray - pixels[pIdx + 1]) * alpha;
+        pixels[pIdx + 2] += (gray - pixels[pIdx + 2]) * alpha;
+      }
+    }
+  }
+
+  // 火災数チェックによるゲームオーバー判定
+  if (!isEditMode && isClearMode && fires.length >= maxFireLimit) {
+    isGameOver = true;
+  }
+
+  // クリア判定 (クリア有りモード時: 全バンディット無力化 && 全ての炎消火)
+  if (!isEditMode && isClearMode && !isGameOver && !isGameClear) {
+    const allBanditsNeutralized = bandits.length > 0 && bandits.every(b => b.isNeutralized);
+    if (allBanditsNeutralized && fires.length === 0) {
+      isGameClear = true;
+    }
+  }
+
+  // 9. 消防士 (味方NPC) 描画
+  firefighters.forEach(ff => {
+    ff.update();
+    const ffNodes = ff.getNodes();
+
+    const ffAlphaBuffer = new Float32Array(WIDTH * HEIGHT);
+    ff.particles.forEach(p => {
+      p.update(ffNodes[p.nodeName], ff.angle, ffNodes.spd, false);
+
+      const px = Math.floor(p.x);
+      const py = Math.floor(p.y);
+      const r = Math.ceil(p.radius);
+
+      for (let dy = -r; dy <= r; dy++) {
+        for (let dx = -r; dx <= r; dx++) {
+          const x = px + dx;
+          const y = py + dy;
+
+          if (x >= 0 && x < WIDTH && y >= 0 && y < HEIGHT) {
+            const distSq = dx * dx + dy * dy;
+            if (distSq < p.radius * p.radius) {
+              const intense = (1 - Math.sqrt(distSq) / p.radius) * 58;
+              ffAlphaBuffer[y * WIDTH + x] += intense;
+            }
+          }
+        }
+      }
+    });
+
+    for (let y = 0; y < HEIGHT; y++) {
+      for (let x = 0; x < WIDTH; x++) {
+        const idx = y * WIDTH + x;
+        const alpha = ffAlphaBuffer[idx];
+        if (alpha <= 4) continue;
+
+        const pIdx = idx * 4;
+        const randomVal = Math.random() * 110;
+
+        const hDx = x - ffNodes.head.x;
+        const hDy = y - ffNodes.head.y;
+        const isHeadCenter = (hDx * hDx + hDy * hDy) < 2.0;
+
+        if (isHeadCenter && alpha > 35) {
+          // ヘルメット（黄色）
+          pixels[pIdx]     = 255; pixels[pIdx + 1] = 220; pixels[pIdx + 2] = 0;
+        } else if (alpha > 90) {
+          // 防火服（オレンジ）
+          pixels[pIdx]     = 240; pixels[pIdx + 1] = 100; pixels[pIdx + 2] = 20;
+        } else if (randomVal < alpha) {
+          if (alpha > 30) {
+            pixels[pIdx]     = 200; pixels[pIdx + 1] = 130; pixels[pIdx + 2] = 30;
+          } else {
+            pixels[pIdx]     = 100; pixels[pIdx + 1] = 40;  pixels[pIdx + 2] = 10;
+          }
+        }
+      }
+    }
+
+    // 手元の標準装備消火器
+    const extX = Math.floor(ffNodes.rHand.x);
+    const extY = Math.floor(ffNodes.rHand.y);
+    for (let dy = -2; dy <= 2; dy++) {
+      for (let dx = -2; dx <= 2; dx++) {
+        const px = extX + dx;
+        const py = extY + dy;
+        if (px >= 0 && px < WIDTH && py >= 0 && py < HEIGHT) {
+          const pIdx = (py * WIDTH + px) * 4;
+          pixels[pIdx]     = 230;
+          pixels[pIdx + 1] = 30;
+          pixels[pIdx + 2] = 30;
+        }
+      }
+    }
+  });
+
+  // 10. バンディット (放火魔NPC)
+  bandits.forEach(b => {
+    b.update();
+    const bNodes = b.getNodes();
+
+    if (b.isNeutralized) {
+      const bx = Math.floor(b.x);
+      const by = Math.floor(b.y);
+
+      for (let oy = -6; oy <= 6; oy++) {
+        for (let ox = -6; ox <= 6; ox++) {
+          const px = bx + ox;
+          const py = by + oy;
+          if (px >= 0 && px < WIDTH && py >= 0 && py < HEIGHT) {
+            const pIdx = (py * WIDTH + px) * 4;
+            const isBorder = (Math.abs(ox) === 6 || Math.abs(oy) === 6);
+            pixels[pIdx]     = isBorder ? 70 : 130;
+            pixels[pIdx + 1] = isBorder ? 40 : 80;
+            pixels[pIdx + 2] = isBorder ? 15 : 35;
+          }
+        }
+      }
+    }
+
+    const alphaBuffer = new Float32Array(WIDTH * HEIGHT);
+    b.particles.forEach(p => {
+      p.update(bNodes[p.nodeName], b.angle, bNodes.spd, false);
+
+      const px = Math.floor(p.x);
+      const py = Math.floor(p.y);
+      const r = Math.ceil(p.radius);
+
+      for (let dy = -r; dy <= r; dy++) {
+        for (let dx = -r; dx <= r; dx++) {
+          const x = px + dx;
+          const y = py + dy;
+
+          if (x >= 0 && x < WIDTH && y >= 0 && y < HEIGHT) {
+            const distSq = dx * dx + dy * dy;
+            if (distSq < p.radius * p.radius) {
+              const intense = (1 - Math.sqrt(distSq) / p.radius) * 58;
+              alphaBuffer[y * WIDTH + x] += intense;
+            }
+          }
+        }
+      }
+    });
+
+    for (let y = 0; y < HEIGHT; y++) {
+      for (let x = 0; x < WIDTH; x++) {
+        const idx = y * WIDTH + x;
+        const alpha = alphaBuffer[idx];
+        if (alpha <= 4) continue;
+
+        const pIdx = idx * 4;
+        const randomVal = Math.random() * 110;
+
+        const hDx = x - bNodes.head.x;
+        const hDy = y - bNodes.head.y;
+        const isEye = (hDx * hDx + hDy * hDy) < 1.2;
+
+        if (isEye) {
+          pixels[pIdx]     = 255; pixels[pIdx + 1] = 30;  pixels[pIdx + 2] = 30;
+        } else if (alpha > 80) {
+          pixels[pIdx]     = 35;  pixels[pIdx + 1] = 35;  pixels[pIdx + 2] = 45;
+        } else if (randomVal < alpha) {
+          pixels[pIdx]     = 15;  pixels[pIdx + 1] = 15;  pixels[pIdx + 2] = 20;
+        }
+      }
+    }
+
+    if (b.isTied || b.isNeutralized) {
+      const bx = Math.floor(b.x);
+      const by = Math.floor(b.y);
+
+      const ringCount = b.isNeutralized ? 5 : 4;
+      for (let ring = -ringCount; ring <= ringCount; ring += 2) {
+        for (let a = 0; a < Math.PI * 2; a += 0.3) {
+          const rx = Math.floor(bx + Math.cos(a) * (b.isNeutralized ? 6.5 : 5.0));
+          const ry = Math.floor(by + ring + Math.sin(a) * 2.2);
+
+          if (rx >= 0 && rx < WIDTH && ry >= 0 && ry < HEIGHT) {
+            const pIdx = (ry * WIDTH + rx) * 4;
+            pixels[pIdx]     = 230;
+            pixels[pIdx + 1] = 180;
+            pixels[pIdx + 2] = 80;
+          }
+        }
+      }
+    }
+  });
+
+  // 11. プレイヤー描画
+  const { speed, isDashing, rReachProgress, nodes } = player.update();
+  const playerAlphaBuffer = new Float32Array(WIDTH * HEIGHT);
+
+  playerParticles.forEach(p => {
+    p.update(nodes[p.nodeName], player.angle, speed, isDashing);
+
+    const px = Math.floor(p.x);
+    const py = Math.floor(p.y);
+    const r = Math.ceil(p.radius);
+
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        const x = px + dx;
+        const y = py + dy;
+
+        if (x >= 0 && x < WIDTH && y >= 0 && y < HEIGHT) {
+          const distSq = dx * dx + dy * dy;
+          if (distSq < p.radius * p.radius) {
+            const intense = (1 - Math.sqrt(distSq) / p.radius) * 58;
+            playerAlphaBuffer[y * WIDTH + x] += intense;
+          }
+        }
+      }
+    }
+  });
+
+  for (let y = 0; y < HEIGHT; y++) {
+    for (let x = 0; x < WIDTH; x++) {
+      const idx = y * WIDTH + x;
+      const alpha = playerAlphaBuffer[idx];
+      if (alpha <= 4) continue;
+
+      const pIdx = idx * 4;
+      const randomVal = Math.random() * 110;
+
+      const hDx = x - nodes.head.x;
+      const hDy = y - nodes.head.y;
+      const isHeadCenter = (hDx * hDx + hDy * hDy) < 2.0;
+
+      if (isHeadCenter && alpha > 35) {
+        pixels[pIdx]     = 230; pixels[pIdx + 1] = 255; pixels[pIdx + 2] = 240;
+      } else if (alpha > 90) {
+        pixels[pIdx]     = 180; pixels[pIdx + 1] = 255; pixels[pIdx + 2] = 200;
+      } else if (randomVal < alpha) {
+        if (alpha > 30) {
+          pixels[pIdx]     = 0;   pixels[pIdx + 1] = 225; pixels[pIdx + 2] = 110;
+        } else {
+          pixels[pIdx]     = 10;  pixels[pIdx + 1] = 75;  pixels[pIdx + 2] = 40;
+        }
+      }
+    }
+  }
+
+  // 12. 消火泡（炎の消火 & 敵への吹きつけ判定）
+  for (let i = foamParticles.length - 1; i >= 0; i--) {
+    const fp = foamParticles[i];
+    fp.update();
+
+    // 炎への消火
+    for (let j = fires.length - 1; j >= 0; j--) {
+      const fire = fires[j];
+      const fireRadius = fire.radius;
+      if (Math.hypot(fp.x - fire.x, fp.y - fire.y) < fireRadius + fp.radius) {
+        // 消防士NPCの泡はプレイヤーより消火速度を遅くする
+        const extinguishPower = fp.isFirefighter ? 0.22 : 1.0;
+        fire.hp -= 3.5 * extinguishPower;
+        fire.radius -= 0.15 * extinguishPower;
+        fp.life = 0;
+        break;
+      }
+    }
+
+    // 敵（バンディット）への吹きつけ判定（走って逃走＆20秒間救援停止）
+    // ※仲間の救出を試みている最中のバンディットにしか効果がない
+    if (fp.life > 0) {
+      for (let b of bandits) {
+        if (!b.isNeutralized && !b.isTied && b.rescuingTarget) {
+          if (Math.hypot(fp.x - b.x, fp.y - b.y) < fp.radius + 6.0) {
+            b.hitByExtinguisher(fp.x, fp.y);
+            fp.life = 0;
+            break;
+          }
+        }
+      }
+    }
+
+    if (fp.life <= 0) {
+      foamParticles.splice(i, 1);
+      continue;
+    }
+
+    const px = Math.floor(fp.x);
+    const py = Math.floor(fp.y);
+    const r = Math.ceil(fp.radius);
+
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        const lx = px + dx;
+        const ly = py + dy;
+
+        if (lx >= 0 && lx < WIDTH && ly >= 0 && ly < HEIGHT) {
+          if (dx * dx + dy * dy <= fp.radius * fp.radius) {
+            const pIdx = (ly * WIDTH + lx) * 4;
+            const intense = fp.life;
+            pixels[pIdx]     = Math.min(255, pixels[pIdx]     + 220 * intense);
+            pixels[pIdx + 1] = Math.min(255, pixels[pIdx + 1] + 240 * intense);
+            pixels[pIdx + 2] = Math.min(255, pixels[pIdx + 2] + 255 * intense);
+          }
+        }
+      }
+    }
+  }
+
+  // 13. 縄破片
+  for (let i = ropeCutParticles.length - 1; i >= 0; i--) {
+    const rp = ropeCutParticles[i];
+    rp.update();
+    if (rp.life <= 0) { ropeCutParticles.splice(i, 1); continue; }
+
+    const px = Math.floor(rp.x);
+    const py = Math.floor(rp.y);
+    if (px >= 0 && px < WIDTH && py >= 0 && py < HEIGHT) {
+      const pIdx = (py * WIDTH + px) * 4;
+      pixels[pIdx]     = 210;
+      pixels[pIdx + 1] = 160;
+      pixels[pIdx + 2] = 80;
+    }
+  }
+
+  const prevFireCount = fires.length;
+  fires = fires.filter(f => f.hp > 0 && f.radius > 1.0);
+  if (prevFireCount !== fires.length && isEditMode) updateStats();
+
+  // 14. ライティング
+  if (isEditMode) {
+    lightMap.fill(1.0);
+  } else {
+    lightMap.fill(0.08);
+
+    const px = player.x;
+    const py = player.y;
+    const playerVisionR = 30;
+    const minX = Math.max(0, Math.floor(px - playerVisionR));
+    const maxX = Math.min(WIDTH - 1, Math.ceil(px + playerVisionR));
+    const minY = Math.max(0, Math.floor(py - playerVisionR));
+    const maxY = Math.min(HEIGHT - 1, Math.ceil(py + playerVisionR));
+
+    for (let ly = minY; ly <= maxY; ly++) {
+      for (let lx = minX; lx <= maxX; lx++) {
+        const d = Math.hypot(lx - px, ly - py);
+        if (d < playerVisionR) {
+          const factor = (1 - d / playerVisionR) * 0.48;
+          const idx = ly * WIDTH + lx;
+          lightMap[idx] = Math.max(lightMap[idx], 0.08 + factor);
+        }
+      }
+    }
+
+    if (rReachProgress > 0.01) {
+      const lightSourceX = nodes.rHand.x;
+      const lightSourceY = nodes.rHand.y;
+      const lightAngle = player.angle;
+      const maxRange = 95 * rReachProgress;
+      const fov = 0.52;
+
+      const lMinX = Math.max(0, Math.floor(lightSourceX - maxRange));
+      const lMaxX = Math.min(WIDTH - 1, Math.ceil(lightSourceX + maxRange));
+      const lMinY = Math.max(0, Math.floor(lightSourceY - maxRange));
+      const lMaxY = Math.min(HEIGHT - 1, Math.ceil(lightSourceY + maxRange));
+
+      for (let ly = lMinY; ly <= lMaxY; ly++) {
+        for (let lx = lMinX; lx <= lMaxX; lx++) {
+          const dx = lx - lightSourceX;
+          const dy = ly - lightSourceY;
+          const dist = Math.hypot(dx, dy);
+
+          if (dist > 0 && dist < maxRange) {
+            const pAngle = Math.atan2(dy, dx);
+            let diff = pAngle - lightAngle;
+            while (diff < -Math.PI) diff += Math.PI * 2;
+            while (diff > Math.PI) diff -= Math.PI * 2;
+
+            if (Math.abs(diff) < fov) {
+              const distFactor = 1.0 - (dist / maxRange);
+              const angleFactor = 1.0 - (Math.abs(diff) / fov);
+              const intensity = distFactor * angleFactor * rReachProgress * 1.45;
+              const flicker = 0.88 + Math.random() * 0.24;
+
+              const idx = ly * WIDTH + lx;
+              lightMap[idx] = Math.min(1.5, lightMap[idx] + intensity * flicker);
+            }
+          }
+        }
+      }
+    }
+
+    fires.forEach(fire => {
+      const fireLightR = 25 + fire.radius * 2.2;
+      const fx = fire.x;
+      const fy = fire.y;
+      const fMinX = Math.max(0, Math.floor(fx - fireLightR));
+      const fMaxX = Math.min(WIDTH - 1, Math.ceil(fx + fireLightR));
+      const fMinY = Math.max(0, Math.floor(fy - fireLightR));
+      const fMaxY = Math.min(HEIGHT - 1, Math.ceil(fy + fireLightR));
+
+      for (let ly = fMinY; ly <= fMaxY; ly++) {
+        for (let lx = fMinX; lx <= fMaxX; lx++) {
+          const d = Math.hypot(lx - fx, ly - fy);
+          if (d < fireLightR) {
+            const intensity = (1 - d / fireLightR) * 0.9 * (0.82 + Math.random() * 0.35);
+            const idx = ly * WIDTH + lx;
+            lightMap[idx] = Math.min(1.6, lightMap[idx] + intensity);
+          }
+        }
+      }
+    });
+  }
+
+  for (let y = 0; y < HEIGHT; y++) {
+    for (let x = 0; x < WIDTH; x++) {
+      const idx = y * WIDTH + x;
+      const lm = lightMap[idx];
+      const pIdx = idx * 4;
+
+      pixels[pIdx]     = Math.min(255, pixels[pIdx]     * lm);
+      pixels[pIdx + 1] = Math.min(255, pixels[pIdx + 1] * lm);
+      pixels[pIdx + 2] = Math.min(255, pixels[pIdx + 2] * lm);
+    }
+  }
+
+  ctx.putImageData(imgData, 0, 0);
+
+  // 15. オーバーレイ描画
+  ctx.save();
+
+  // バンディットのUI（救出バー・逃走状態など）描画
+  if (!isEditMode && !isGameOver && !isGameClear) {
+    bandits.forEach(b => {
+      // 救援停止・逃走中の20秒タイマー表示
+      if (b.rescueCooldownTimer > 0 && !b.isTied && !b.isNeutralized) {
+        ctx.fillStyle = '#ffaa00';
+        ctx.font = '8px monospace';
+        ctx.textAlign = 'center';
+        const remainingSec = Math.ceil(b.rescueCooldownTimer / 60);
+        ctx.fillText(`!? ${remainingSec}s`, b.x, b.y - 10);
+      }
+
+      // 救出ゲージ
+      if (b.rescueTimer > 0 && b.rescuingTarget) {
+        const target = b.rescuingTarget;
+        const progress = b.rescueTimer / 300; // 5秒
+        const barWidth = 16;
+        const barHeight = 3;
+        const bx = target.x - barWidth / 2;
+        const by = target.y - 12;
+
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+        ctx.fillRect(bx - 1, by - 1, barWidth + 2, barHeight + 2);
+
+        ctx.fillStyle = '#ffaa00';
+        ctx.fillRect(bx, by, barWidth * progress, barHeight);
+
+        ctx.strokeStyle = 'rgba(255, 170, 0, 0.6)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(b.x, b.y);
+        ctx.lineTo(target.x, target.y);
+        ctx.stroke();
+      }
+    });
+  }
+
+  // エディタオーバーレイ描画
+  if (isEditMode) {
+    ctx.strokeStyle = '#00ffff';
+    ctx.fillStyle = '#00ffff';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(spawnPoint.x, spawnPoint.y, 5, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.font = '9px monospace';
+    ctx.fillText('S', spawnPoint.x - 2.5, spawnPoint.y + 3);
+
+    if (snapToGrid) {
+      ctx.strokeStyle = 'rgba(0, 255, 102, 0.15)';
+      ctx.lineWidth = 0.5;
+      for (let x = 0; x < WIDTH; x += 8) {
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, HEIGHT); ctx.stroke();
+      }
+      for (let y = 0; y < HEIGHT; y += 8) {
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(WIDTH, y); ctx.stroke();
+      }
+    }
+
+    if (wallStartPoint && isMouseInCanvas) {
+      ctx.strokeStyle = '#ff3366';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(wallStartPoint.x, wallStartPoint.y);
+      ctx.lineTo(currentMousePos.x, currentMousePos.y);
+      ctx.stroke();
+    }
+
+    // 家具・ドア配置時の半透明プレビュー＋向き表示
+    if (isMouseInCanvas && !wallStartPoint && !templateCaptureStart) {
+      if (furnitureTypes.includes(currentTool)) {
+        const tmp = new Furniture(currentTool, currentMousePos.x, currentMousePos.y, itemRotateAngle);
+        ctx.save();
+        ctx.globalAlpha = 0.55;
+        ctx.translate(tmp.x, tmp.y);
+        ctx.rotate(tmp.angle);
+        ctx.fillStyle = '#66ffcc';
+        ctx.fillRect(-tmp.w / 2, -tmp.h / 2, tmp.w, tmp.h);
+        ctx.restore();
+
+        // 向き（正面）を示す矢印
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(tmp.x, tmp.y);
+        ctx.lineTo(tmp.x + Math.cos(tmp.angle) * (tmp.w / 2 + 5), tmp.y + Math.sin(tmp.angle) * (tmp.h / 2 + 5));
+        ctx.stroke();
+      } else if (currentTool === 'door') {
+        const previewAngle = itemRotateAngle;
+        const len = 22;
+        const ex = currentMousePos.x + Math.cos(previewAngle) * len;
+        const ey = currentMousePos.y + Math.sin(previewAngle) * len;
+        ctx.save();
+        ctx.globalAlpha = 0.55;
+        ctx.strokeStyle = '#ffaa55';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(currentMousePos.x, currentMousePos.y);
+        ctx.lineTo(ex, ey);
+        ctx.stroke();
+        ctx.restore();
+
+        // ドアが開く向き（法線方向）を示す矢印
+        const normalAngle = previewAngle + Math.PI / 2;
+        const midX = (currentMousePos.x + ex) / 2;
+        const midY = (currentMousePos.y + ey) / 2;
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(midX, midY);
+        ctx.lineTo(midX + Math.cos(normalAngle) * 8, midY + Math.sin(normalAngle) * 8);
+        ctx.stroke();
+      } else if (currentTool === 'erase') {
+        ctx.strokeStyle = 'rgba(255, 60, 60, 0.7)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(currentMousePos.x, currentMousePos.y, 12, 0, Math.PI * 2);
+        ctx.stroke();
+      } else if (['spawn', 'box', 'extinguisher', 'fire', 'rope', 'bandit', 'firefighter'].includes(currentTool)) {
+        ctx.save();
+        ctx.globalAlpha = 0.55;
+        ctx.fillStyle = '#66ffcc';
+        ctx.beginPath();
+        ctx.arc(currentMousePos.x, currentMousePos.y, 5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+    }
+
+    if (templateCaptureStart && isMouseInCanvas) {
+      ctx.strokeStyle = '#ffdd33';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([3, 2]);
+      const rx = Math.min(templateCaptureStart.x, currentMousePos.x);
+      const ry = Math.min(templateCaptureStart.y, currentMousePos.y);
+      const rw = Math.abs(currentMousePos.x - templateCaptureStart.x);
+      const rh = Math.abs(currentMousePos.y - templateCaptureStart.y);
+      ctx.strokeRect(rx, ry, rw, rh);
+      ctx.setLineDash([]);
+    }
+  }
+
+  // ゲームオーバー / クリア表示
+  if (isGameOver) {
+    gameOverAlpha = Math.min(0.85, gameOverAlpha + 0.02);
+    ctx.fillStyle = `rgba(40, 0, 0, ${gameOverAlpha})`;
+    ctx.fillRect(0, 0, WIDTH, HEIGHT);
+
+    ctx.fillStyle = '#ff2200';
+    ctx.font = 'bold 16px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('🔥 BURN OUT 🔥', WIDTH / 2, HEIGHT / 2 - 6);
+
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '9px monospace';
+    ctx.fillText('火災が限界を超えました [R]: リトライ', WIDTH / 2, HEIGHT / 2 + 10);
+  } else if (isGameClear) {
+    gameClearAlpha = Math.min(0.85, gameClearAlpha + 0.02);
+    ctx.fillStyle = `rgba(0, 40, 10, ${gameClearAlpha})`;
+    ctx.fillRect(0, 0, WIDTH, HEIGHT);
+
+    ctx.fillStyle = '#00ff66';
+    ctx.font = 'bold 16px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('🎉 MISSION CLEAR 🎉', WIDTH / 2, HEIGHT / 2 - 6);
+
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '9px monospace';
+    ctx.fillText('すべての鎮火と放火魔の無力化に成功！ [R]: リトライ', WIDTH / 2, HEIGHT / 2 + 10);
+  }
+
+  ctx.restore();
+
+  updateEditorCameraPan();
+
+  requestAnimationFrame(render);
+}
+
+loadTemplatesFromStorage();
+refreshSlotSelect();
+updateWindIndicator();
+
+// ゲームループ起動
+requestAnimationFrame(render);
+</script>
+</body>
+</html>
